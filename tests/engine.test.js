@@ -13,6 +13,9 @@ import {
   getCategory,
   getAngle,
   verifyPullQuotes,
+  normalizeSections,
+  sectionsToText,
+  SECTIONS,
 } from "../engine.js";
 import { CATEGORIES, ANGLES } from "../data.js";
 
@@ -148,16 +151,27 @@ test("matchCategory falls back on garbage output", async () => {
   assert.notEqual(m.angleId, "auto");
 });
 
-test("generateNarrative normalizes and keeps only well-formed claims", async () => {
+test("generateNarrative normalizes the tabloid section schema and well-formed claims", async () => {
   const fake = async () =>
     JSON.stringify({
+      kicker: "WORLD EXCLUSIVE",
       headline: "The Pattern",
       subhead: "sub",
-      body: "long body",
+      sections: {
+        intro: "Shocking open.",
+        setup: "The official story.",
+        deepDive: "The evidence.",
+        reveal: "Connect the dots.",
+        fingerPointing: "Who benefited?",
+        nameAndShame: "The verdict.",
+      },
       claims: [{ text: "claim a", basedOn: "F1" }, { text: "missing basedOn" }, "garbage"],
     });
   const n = await generateNarrative(provider, workFile, CATEGORIES[0], ANGLE, "English", fake);
+  assert.equal(n.kicker, "WORLD EXCLUSIVE");
   assert.equal(n.headline, "The Pattern");
+  assert.equal(n.sections.intro, "Shocking open.");
+  assert.equal(n.sections.nameAndShame, "The verdict.");
   assert.deepEqual(n.claims, [{ text: "claim a", basedOn: "F1" }]);
   // New fields default cleanly when the model omits them.
   assert.deepEqual(n.pullQuotes, []);
@@ -215,19 +229,51 @@ test("narrative prompt forbids fabricating quotes and demands a closer", () => {
   assert.match(system, /closer/i);
 });
 
-test("deconstruction prompt is told about reframed quotes and the closer", () => {
+test("deconstruction prompt walks the sections and flags quotes + closer", () => {
   const narrative = {
-    headline: "H", subhead: "S", body: "B", claims: [],
+    headline: "H", subhead: "S",
+    sections: { intro: "shock open", setup: "official story here", deepDive: "", reveal: "dots connected", fingerPointing: "", nameAndShame: "guilty verdict" },
+    claims: [],
     pullQuotes: [{ quote: "clashed with Thomas Edison", attributedTo: "WP", spin: "war" }],
     closer: "It never ended.",
   };
   const { system, user } = buildDeconstructionPrompt(narrative, workFile);
   assert.match(system, /out of context|continuation/i);
+  assert.match(system, /Official Story|cui-bono|Verdict/i, "per-section technique naming requested");
+  assert.match(user, /official story here/, "section text included");
+  assert.match(user, /guilty verdict/);
   assert.match(user, /clashed with Thomas Edison/);
   assert.match(user, /never ended/);
 });
 
-test("generateNarrative throws when no usable body comes back", async () => {
+test("normalizeSections fills the fixed arc and back-fills a legacy body into deepDive", () => {
+  const full = normalizeSections({ sections: { intro: "i", setup: "s", deepDive: "d", reveal: "r", fingerPointing: "f", nameAndShame: "n" } });
+  assert.deepEqual(Object.keys(full), SECTIONS.map((s) => s.key));
+  assert.equal(full.intro, "i");
+  const legacy = normalizeSections({ body: "old flat body" });
+  assert.equal(legacy.deepDive, "old flat body");
+  assert.equal(normalizeSections({}), null);
+  assert.equal(normalizeSections(null), null);
+});
+
+test("sectionsToText emits labeled, ordered, non-empty sections", () => {
+  const txt = sectionsToText({ intro: "A", setup: "", deepDive: "C", reveal: "", fingerPointing: "", nameAndShame: "Z" });
+  assert.match(txt, /\[The Hook\]\nA/);
+  assert.match(txt, /\[The Evidence\]\nC/);
+  assert.match(txt, /\[The Verdict\]\nZ/);
+  assert.ok(!txt.includes("[The Official Story]"), "empty sections skipped");
+  // Order preserved: Hook before Evidence before Verdict.
+  assert.ok(txt.indexOf("Hook") < txt.indexOf("Evidence") && txt.indexOf("Evidence") < txt.indexOf("Verdict"));
+});
+
+test("narrative prompt enforces the full section arc + kicker", () => {
+  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0], ANGLE);
+  for (const s of SECTIONS) assert.ok(system.includes(`"${s.key}"`), `prompt names section ${s.key}`);
+  assert.match(system, /kicker/i);
+  assert.match(system, /TABLOID/);
+});
+
+test("generateNarrative throws when no usable article comes back", async () => {
   const fake = async () => "no json at all";
   await assert.rejects(() => generateNarrative(provider, workFile, CATEGORIES[0], ANGLE, "English", fake), /usable article/);
 });

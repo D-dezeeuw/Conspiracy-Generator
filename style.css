@@ -70,13 +70,27 @@ button.primary:not(:disabled):hover { background: var(--accent); }
 /* --- The article --- */
 .article { border-top: 3px double var(--ink); padding-top: 1.25rem; margin-bottom: 1.25rem; }
 .article .label { display: inline-block; background: var(--accent); color: #fff; font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.18em; padding: 0.2rem 0.5rem; border-radius: 2px; margin-bottom: 0.75rem; }
-.article h2.headline { font-size: clamp(1.7rem, 5vw, 2.6rem); font-weight: 800; line-height: 1.1; margin: 0.2rem 0; letter-spacing: -0.015em; }
-.article .subhead { font-style: italic; font-size: 1.1rem; color: var(--ink-soft); margin: 0.4rem 0 1rem; }
+/* Tabloid kicker overline above the headline. */
+.article .kicker-overline { font-family: var(--mono); font-weight: 700; text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.72rem; color: var(--accent); margin: 0.5rem 0 0.1rem; }
+.article h2.headline { font-size: clamp(2rem, 6.5vw, 3.1rem); font-weight: 800; line-height: 1.04; margin: 0.2rem 0; letter-spacing: -0.02em; }
+.tabloid h2.headline { text-transform: uppercase; }
+.article .subhead { font-style: italic; font-size: 1.15rem; color: var(--ink-soft); margin: 0.4rem 0 1.2rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; }
 .article .body p { margin: 0 0 1rem; }
 .article .body::after { content: ""; display: block; clear: both; }
+
+/* The enforced tabloid arc — each beat labeled. */
+.report-section { margin: 0 0 1.4rem; }
+.report-section .section-label {
+  font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.15em; font-size: 0.7rem;
+  color: var(--accent-2); margin: 0 0 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px dotted var(--rule);
+}
+/* Drop cap on the very first paragraph of the opening section — classic front-page flourish. */
+.report-section:first-of-type .section-paras p:first-child::first-letter {
+  float: left; font-weight: 800; font-size: 3.1rem; line-height: 0.8; padding: 0.1rem 0.5rem 0 0; color: var(--accent);
+}
 /* Layer exists only to give the pull-quote loop its own parent; it must not
    affect layout, so floats inside still reference the .body column. */
-.quotes-layer, .paras-layer { display: contents; }
+.quotes-layer, .paras-layer, .sections-layer, .section-paras { display: contents; }
 
 /* Manufactured authority quotes — real words, ominous framing. Floated so
    they sit alongside the running text like a newspaper pull-quote. */
