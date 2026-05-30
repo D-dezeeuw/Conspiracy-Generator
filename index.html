@@ -80,12 +80,7 @@
             people.
           </div>
         </div>
-        <button
-          class="primary"
-          data-action="click"
-          data-fn="runEngine"
-          :disabled="busy"
-        >
+        <button class="primary" data-action="click" data-fn="runEngine" :disabled="busy">
           Run the engine
         </button>
         <div :class="statusClass">{{status}}</div>
@@ -94,10 +89,6 @@
       <!-- Exhibit: the work-file of real, sourced facts -->
       <section class="card exhibit" data-if="hasMatch">
         <h2>Exhibit · The work-file (real, sourced facts)</h2>
-        <p class="match-note">
-          Matched archetype: <span class="cat">{{matchName}}</span> — <em>{{matchFallacy}}</em><br />
-          Why: {{matchReason}}
-        </p>
         <ul>
           <template data-each="correlations" data-as="cor">
             <li>
@@ -106,6 +97,26 @@
             </li>
           </template>
         </ul>
+      </section>
+
+      <!-- Intermediary step: choose the conspiracy pattern (best match preselected) -->
+      <section class="card choice" data-if="hasCategoryChoice">
+        <h2>3 · Choose the conspiracy pattern</h2>
+        <p class="match-note">
+          Recommended: <span class="cat">{{matchName}}</span>
+          <span class="badge" data-if="isRecommended">best match</span><br />
+          Why we think it fits: {{matchReason}}
+        </p>
+        <div class="field">
+          <label for="category">Conspiracy pattern to apply</label>
+          <select id="category" data-model="categoryId"></select>
+        </div>
+        <p class="rationale">{{selCatDescription}}</p>
+        <p class="match-note">Fallacy it illustrates: <em>{{selCatFallacy}}</em></p>
+        <button class="primary" data-action="click" data-fn="continueEngine" :disabled="busy">
+          Continue →
+        </button>
+        <div :class="statusClass">{{status}}</div>
       </section>
 
       <!-- The generated article -->
