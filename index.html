@@ -70,7 +70,7 @@
       </section>
 
       <section class="card">
-        <h2>2 · Subject (the safety gate)</h2>
+        <h2>2 · Target (the safety gate)</h2>
         <div class="field">
           <label for="subject">Long-deceased historical figure</label>
           <select id="subject" data-model="subjectId"></select>
@@ -81,14 +81,14 @@
           </div>
         </div>
         <button class="primary" data-action="click" data-fn="runEngine" :disabled="busy">
-          Run the engine
+          Gather the sources →
         </button>
-        <div :class="statusClass">{{status}}</div>
+        <div :class="statusClass" data-if="!hasCategoryChoice">{{status}}</div>
       </section>
 
-      <!-- Exhibit: the work-file of real, sourced facts -->
+      <!-- The source information gathered for the target -->
       <section class="card exhibit" data-if="hasMatch">
-        <h2>Exhibit · The work-file (real, sourced facts)</h2>
+        <h2>The source information</h2>
         <ul>
           <template data-each="correlations" data-as="cor">
             <li>
@@ -99,29 +99,38 @@
         </ul>
       </section>
 
-      <!-- Intermediary step: choose the conspiracy pattern (best match preselected) -->
+      <!-- Intermediary step: the conspiracy — angle + pattern, both prefilled -->
       <section class="card choice" data-if="hasCategoryChoice">
-        <h2>3 · Choose the conspiracy pattern</h2>
+        <h2>3 · Conspiracy</h2>
         <p class="match-note">
-          Recommended: <span class="cat">{{matchName}}</span>
-          <span class="badge" data-if="isRecommended">best match</span><br />
-          Why we think it fits: {{matchReason}}
+          Recommended angle <span class="cat">{{matchAngleName}}</span> +
+          pattern <span class="cat">{{matchName}}</span><br />
+          Why we think they fit: {{matchReason}}
         </p>
+
         <div class="field">
-          <label for="category">Conspiracy pattern to apply</label>
-          <select id="category" data-model="categoryId"></select>
+          <label for="angle">Angle <span class="badge" data-if="isAngleRecommended">recommended</span></label>
+          <select id="angle" data-model="angleId"></select>
+          <p class="rationale">{{selAngleDescription}}</p>
         </div>
-        <p class="rationale">{{selCatDescription}}</p>
-        <p class="match-note">Fallacy it illustrates: <em>{{selCatFallacy}}</em></p>
+
+        <div class="field">
+          <label for="category">Pattern <span class="badge" data-if="isRecommended">best match</span></label>
+          <select id="category" data-model="categoryId"></select>
+          <p class="rationale">{{selCatDescription}}</p>
+          <div class="hint">Fallacy it illustrates: {{selCatFallacy}}</div>
+        </div>
+
         <div class="field">
           <label for="language">Report language</label>
           <select id="language" data-model="langId"></select>
           <div class="hint">The article and the reveal are written in this language. Sources stay as published.</div>
         </div>
+
         <button class="primary" data-action="click" data-fn="continueEngine" :disabled="busy">
-          Continue →
+          Generate the report →
         </button>
-        <div :class="statusClass">{{status}}</div>
+        <div :class="statusClass" data-if="hasCategoryChoice">{{status}}</div>
       </section>
 
       <!-- The generated article -->

@@ -4,8 +4,8 @@
 // the markup in index.html holds every binding.
 
 import { setValue, computed, addSystem, defineFn, bindDOM, run } from "spektrum";
-import { SUBJECTS, CATEGORIES, LANGUAGES } from "./data.js";
-import { buildWorkFile, matchCategory, generateNarrative, deconstruct, getCategory } from "./engine.js";
+import { SUBJECTS, CATEGORIES, ANGLES, LANGUAGES } from "./data.js";
+import { buildWorkFile, matchCategory, generateNarrative, deconstruct, getCategory, getAngle } from "./engine.js";
 import { toParagraphs } from "./format.js";
 
 const DEFAULTS = { baseUrl: "https://openrouter.ai/api/v1", model: "tencent/hy3-preview" };
@@ -37,10 +37,12 @@ function fillSelect(id, items, label) {
   }
 }
 fillSelect("subject", SUBJECTS, (s) => `${s.name} (d. ${s.died})`);
+fillSelect("angle", ANGLES, (a) => a.name);
 fillSelect("category", CATEGORIES, (c) => c.name);
 fillSelect("language", LANGUAGES, (l) => l.name);
 
 setValue("subjectId", SUBJECTS[0].id);
+setValue("angleId", ANGLES[0].id);     // "auto" — overwritten with the recommendation after run
 setValue("categoryId", CATEGORIES[0].id); // overwritten with the best match after run
 setValue("langId", storedLang);
 setValue("baseUrl", storedBase);
@@ -56,6 +58,7 @@ setValue("sourceUrl", "");
 setValue("hasMatch", false);
 setValue("hasCategoryChoice", false);
 setValue("matchName", "");
+setValue("matchAngleName", "");
 setValue("matchReason", "");
 setValue("hasArticle", false);
 setValue("articleHeadline", "");
@@ -74,13 +77,18 @@ computed("rationale", ["subjectId"], (s) => {
   return sub?.rationale ? `“${sub.rationale}”` : "";
 });
 
-// The currently selected category (defaults to the best match, but the user
+// The currently selected pattern (defaults to the best match, but the user
 // can change the dropdown before continuing). Drives the choice panel.
 computed("selCatName", ["categoryId"], (s) => getCategory(CATEGORIES, s.categoryId)?.name || "");
 computed("selCatDescription", ["categoryId"], (s) => getCategory(CATEGORIES, s.categoryId)?.description || "");
 computed("selCatFallacy", ["categoryId"], (s) => getCategory(CATEGORIES, s.categoryId)?.fallacy_illustrated || "");
 computed("isRecommended", ["categoryId", "recommendedId"], (s) => s.categoryId === s.recommendedId);
 setValue("recommendedId", "");
+
+// The currently selected angle (the thematic lens). Same prefill-then-edit flow.
+computed("selAngleDescription", ["angleId"], (s) => getAngle(ANGLES, s.angleId)?.description || "");
+computed("isAngleRecommended", ["angleId", "recommendedAngleId"], (s) => s.angleId === s.recommendedAngleId);
+setValue("recommendedAngleId", "");
 
 computed("statusClass", ["statusError", "busy"], (s) =>
   "status" + (s.statusError ? " error" : "") + (s.busy ? " spinner" : ""),
@@ -144,23 +152,27 @@ defineFn(
       setValue("status", "Fetching the real Wikipedia data sheet…");
       const workFile = await buildWorkFile(subject);
 
-      setValue("status", "Matching a conspiracy archetype to the facts…");
-      workFile.match = await matchCategory(provider, workFile, CATEGORIES);
+      setValue("status", "Choosing the best-fitting angle + pattern…");
+      workFile.match = await matchCategory(provider, workFile, CATEGORIES, ANGLES);
       const recommended = getCategory(CATEGORIES, workFile.match.categoryId) || CATEGORIES[0];
+      const recommendedAngle = getAngle(ANGLES, workFile.match.angleId) || ANGLES[1];
       currentWorkFile = workFile;
 
       setValue("correlations", workFile.correlations);
       setValue("sourceUrl", workFile.dataSheet.url);
       setValue("hasMatch", true);
 
-      // Recommend, but let the user decide before continuing.
+      // Recommend both axes, but let the user decide before continuing.
       setValue("matchName", recommended.name);
+      setValue("matchAngleName", recommendedAngle.name);
       setValue("matchReason", workFile.match.reasoning);
       setValue("recommendedId", recommended.id);
-      setValue("categoryId", recommended.id); // preselect the dropdown
+      setValue("recommendedAngleId", recommendedAngle.id);
+      setValue("categoryId", recommended.id);   // preselect the pattern dropdown
+      setValue("angleId", recommendedAngle.id);  // preselect the angle dropdown
       setValue("hasCategoryChoice", true);
 
-      setValue("status", "Review the recommended pattern, adjust if you like, then continue.");
+      setValue("status", "Review the recommended angle + pattern, adjust if you like, then continue.");
     } catch (err) {
       setValue("statusError", true);
       setValue("status", err instanceof Error ? err.message : "Something went wrong.");
@@ -184,16 +196,18 @@ defineFn(
 
     const provider = providerFrom(state);
     const category = getCategory(CATEGORIES, state.categoryId) || CATEGORIES[0];
+    const angle = getAngle(ANGLES, state.angleId) || ANGLES[0];
     const language = languageName(state);
-    currentWorkFile.match = { categoryId: category.id, reasoning: state.matchReason || "" };
+    currentWorkFile.match = { categoryId: category.id, angleId: angle.id, reasoning: state.matchReason || "" };
 
     setValue("statusError", false);
     setValue("busy", true);
     clearGenerated();
 
     try {
-      setValue("status", `Generating the (deliberately fallacious) article as “${category.name}” in ${language}…`);
-      const narrative = await generateNarrative(provider, currentWorkFile, category, language);
+      const through = angle.id !== "auto" ? ` through the “${angle.name}” angle` : "";
+      setValue("status", `Generating the (deliberately fallacious) article as “${category.name}”${through} in ${language}…`);
+      const narrative = await generateNarrative(provider, currentWorkFile, category, angle, language);
       setValue("articleHeadline", narrative.headline);
       setValue("articleSubhead", narrative.subhead);
       setValue("bodyParas", toParagraphs(narrative.body));
