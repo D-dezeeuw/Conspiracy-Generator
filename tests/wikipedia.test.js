@@ -63,22 +63,43 @@ test("fetchDataSheet throws on a non-OK response", async () => {
   await assert.rejects(() => fetchDataSheet(subject, fakeFetch), /Could not load/);
 });
 
-test("fetchRelated maps related pages to sourced items", async () => {
+test("fetchRelated maps morelike search hits to sourced items", async () => {
   const fakeFetch = async () => ({
     ok: true,
     status: 200,
     json: async () => ({
-      pages: [
-        { titles: { normalized: "War of the currents" }, extract: "A rivalry…", content_urls: { desktop: { page: "https://en.wikipedia.org/wiki/War_of_the_currents" } } },
-        { title: "Alternating current", extract: "AC…" },
-      ],
+      query: {
+        search: [
+          { title: "War of the currents", snippet: 'A <span class="x">rivalry</span>&nbsp;between' },
+          { title: "Alternating current", snippet: "AC power" },
+        ],
+      },
     }),
   });
   const items = await fetchRelated(subject, fakeFetch);
   assert.equal(items.length, 2);
   assert.equal(items[0].title, "War of the currents");
   assert.equal(items[0].source, "Wikipedia (related)");
+  assert.ok(!items[0].summary.includes("<span"), "snippet markup stripped");
   assert.match(items[1].url, /Alternating_current/);
+});
+
+test("fetchRelated uses a CORS-safe Action API URL and drops the subject's own page", async () => {
+  let calledUrl = "";
+  const fakeFetch = async (url) => {
+    calledUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ query: { search: [{ title: "Nikola Tesla", snippet: "self" }, { title: "Wardenclyffe Tower", snippet: "lab" }] } }),
+    };
+  };
+  const items = await fetchRelated(subject, fakeFetch);
+  assert.match(calledUrl, /\/w\/api\.php\?/, "uses the Action API");
+  assert.match(calledUrl, /origin=\*/, "requests CORS via origin=*");
+  assert.match(calledUrl, /morelike/, "uses morelike");
+  assert.ok(!items.some((i) => i.title === "Nikola Tesla"), "subject's own page excluded");
+  assert.equal(items.length, 1);
 });
 
 test("fetchRelated returns [] on failure (never throws)", async () => {

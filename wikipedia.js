@@ -90,28 +90,36 @@ export async function fetchDataSheet(subject, fetchFn = fetch) {
 }
 
 /**
- * Fetch Wikipedia "related pages" — real topics the encyclopedia links as
- * adjacent to the subject. Each becomes a sourced item with its own URL.
- * Never throws: returns [] on any failure (it's an optional pool widener).
+ * Fetch Wikipedia "related" pages — topics the encyclopedia treats as similar
+ * to the subject. Uses the MediaWiki Action API `morelike` search, which is
+ * CORS-enabled via `origin=*` (the REST `/page/related/` endpoint is NOT
+ * CORS-enabled and 403s from a browser). Each hit becomes a sourced item with
+ * its own URL. Never throws: returns [] on any failure (optional widener).
  * @param {Subject} subject
  * @param {typeof fetch} [fetchFn]
  * @param {number} [limit]
  * @returns {Promise<SourceItem[]>}
  */
 export async function fetchRelated(subject, fetchFn = fetch, limit = 6) {
-  const url = `https://en.wikipedia.org/api/rest_v1/page/related/${encodeURIComponent(subject.wikipedia)}`;
+  const title = subject.wikipedia.replace(/_/g, " ");
+  const srsearch = encodeURIComponent(`morelike:${title}`);
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${srsearch}&srnamespace=0&srlimit=${limit}&format=json&origin=*`;
   try {
     const res = await fetchFn(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return [];
     const data = await res.json();
-    const pages = Array.isArray(data?.pages) ? data.pages : [];
-    return pages.slice(0, limit).map((p) => ({
-      title: p.titles?.normalized || p.title || "",
-      summary: typeof p.extract === "string" ? p.extract : "",
-      url: p.content_urls?.desktop?.page ||
-        `https://en.wikipedia.org/wiki/${encodeURIComponent((p.title || "").replace(/ /g, "_"))}`,
-      source: "Wikipedia (related)",
-    })).filter((p) => p.title);
+    const hits = data?.query?.search;
+    if (!Array.isArray(hits)) return [];
+    return hits
+      .map((h) => ({
+        title: h.title || "",
+        // snippet is HTML with highlight markup; strip tags + entities.
+        summary: typeof h.snippet === "string" ? h.snippet.replace(/<[^>]*>/g, "").replace(/&[a-z]+;/gi, " ").trim() : "",
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent((h.title || "").replace(/ /g, "_"))}`,
+        source: "Wikipedia (related)",
+      }))
+      // Drop the subject's own page if morelike returns it.
+      .filter((h) => h.title && h.title.replace(/ /g, "_") !== subject.wikipedia);
   } catch {
     return [];
   }
