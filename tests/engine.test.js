@@ -5,14 +5,18 @@ import {
   buildWorkFile,
   buildMatchPrompt,
   buildNarrativePrompt,
+  buildConspiracyContext,
   buildDeconstructionPrompt,
   matchCategory,
   generateNarrative,
   deconstruct,
   getCategory,
+  getAngle,
   verifyPullQuotes,
 } from "../engine.js";
-import { CATEGORIES } from "../data.js";
+import { CATEGORIES, ANGLES } from "../data.js";
+
+const ANGLE = ANGLES.find((a) => a.id === "deep_state");
 
 const provider = { baseUrl: "x", model: "m", apiKey: "k" };
 const subject = { id: "tesla", name: "Nikola Tesla", wikipedia: "Nikola_Tesla", died: "1943" };
@@ -71,15 +75,39 @@ test("buildWorkFile assembles from a fetched data sheet", async () => {
   assert.ok(wf.correlations.every((c) => c.url.includes("wikipedia.org")));
 });
 
-test("match prompt lists every category id", () => {
-  const { user } = buildMatchPrompt(workFile, CATEGORIES);
-  for (const c of CATEGORIES) assert.ok(user.includes(c.id));
+test("match prompt lists every pattern id and every non-auto angle id", () => {
+  const { user } = buildMatchPrompt(workFile, CATEGORIES, ANGLES);
+  for (const c of CATEGORIES) assert.ok(user.includes(c.id), `pattern ${c.id}`);
+  for (const a of ANGLES) {
+    if (a.id === "auto") assert.ok(!user.includes("id: auto"), "auto angle excluded");
+    else assert.ok(user.includes(a.id), `angle ${a.id}`);
+  }
 });
 
 test("narrative prompt forbids inventing facts and tags claims", () => {
-  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0]);
+  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0], ANGLE);
   assert.match(system, /Do NOT invent/);
   assert.match(system, /basedOn/);
+});
+
+test("buildConspiracyContext includes the pattern context and the angle context", () => {
+  const ctx = buildConspiracyContext(CATEGORIES[0], ANGLE);
+  assert.ok(ctx.includes(CATEGORIES[0].context), "pattern context present");
+  assert.ok(ctx.includes(ANGLE.context), "angle context present");
+  assert.match(ctx, new RegExp(ANGLE.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("buildConspiracyContext omits the angle block for 'auto'", () => {
+  const auto = getAngle(ANGLES, "auto");
+  const ctx = buildConspiracyContext(CATEGORIES[0], auto);
+  assert.ok(ctx.includes(CATEGORIES[0].context));
+  assert.ok(!ctx.includes(auto.context), "auto angle context not injected");
+});
+
+test("narrative prompt carries BOTH the pattern and angle context (the extra check)", () => {
+  const { user } = buildNarrativePrompt(workFile, CATEGORIES[0], ANGLE);
+  assert.ok(user.includes(CATEGORIES[0].context), "pattern context reaches the prompt");
+  assert.ok(user.includes(ANGLE.context), "angle context reaches the prompt");
 });
 
 test("deconstruction prompt asks for moves + fallacies", () => {
@@ -91,23 +119,33 @@ test("deconstruction prompt asks for moves + fallacies", () => {
   assert.match(system, /moves/);
 });
 
-test("matchCategory returns the model's valid category", async () => {
-  const fake = async () => '{"categoryId":"hidden_network","reasoning":"ties"}';
-  const m = await matchCategory(provider, workFile, CATEGORIES, fake);
+test("matchCategory returns the model's valid pattern + angle", async () => {
+  const fake = async () => '{"categoryId":"hidden_network","angleId":"deep_state","reasoning":"ties"}';
+  const m = await matchCategory(provider, workFile, CATEGORIES, ANGLES, fake);
   assert.equal(m.categoryId, "hidden_network");
+  assert.equal(m.angleId, "deep_state");
   assert.ok(getCategory(CATEGORIES, m.categoryId));
+  assert.ok(getAngle(ANGLES, m.angleId));
 });
 
-test("matchCategory falls back on an unknown id", async () => {
-  const fake = async () => '{"categoryId":"does_not_exist"}';
-  const m = await matchCategory(provider, workFile, CATEGORIES, fake);
+test("matchCategory falls back on an unknown pattern id", async () => {
+  const fake = async () => '{"categoryId":"does_not_exist","angleId":"politics"}';
+  const m = await matchCategory(provider, workFile, CATEGORIES, ANGLES, fake);
   assert.equal(m.categoryId, CATEGORIES[0].id);
+});
+
+test("matchCategory falls back to a real angle when angle is missing or 'auto'", async () => {
+  const fake = async () => '{"categoryId":"hidden_network","angleId":"auto"}';
+  const m = await matchCategory(provider, workFile, CATEGORIES, ANGLES, fake);
+  assert.notEqual(m.angleId, "auto", "auto is never the recommendation");
+  assert.ok(getAngle(ANGLES, m.angleId) && m.angleId, "a concrete angle was chosen");
 });
 
 test("matchCategory falls back on garbage output", async () => {
   const fake = async () => "the answer is probably the network one";
-  const m = await matchCategory(provider, workFile, CATEGORIES, fake);
+  const m = await matchCategory(provider, workFile, CATEGORIES, ANGLES, fake);
   assert.equal(m.categoryId, CATEGORIES[0].id);
+  assert.notEqual(m.angleId, "auto");
 });
 
 test("generateNarrative normalizes and keeps only well-formed claims", async () => {
@@ -118,7 +156,7 @@ test("generateNarrative normalizes and keeps only well-formed claims", async () 
       body: "long body",
       claims: [{ text: "claim a", basedOn: "F1" }, { text: "missing basedOn" }, "garbage"],
     });
-  const n = await generateNarrative(provider, workFile, CATEGORIES[0], "English", fake);
+  const n = await generateNarrative(provider, workFile, CATEGORIES[0], ANGLE, "English", fake);
   assert.equal(n.headline, "The Pattern");
   assert.deepEqual(n.claims, [{ text: "claim a", basedOn: "F1" }]);
   // New fields default cleanly when the model omits them.
@@ -164,14 +202,14 @@ test("generateNarrative filters fabricated pull quotes and keeps the closer", as
       ],
       closer: "And the pattern never truly ended.",
     });
-  const n = await generateNarrative(provider, workFile, CATEGORIES[0], "English", fake);
+  const n = await generateNarrative(provider, workFile, CATEGORIES[0], ANGLE, "English", fake);
   assert.equal(n.pullQuotes.length, 1, "only the verbatim quote survives");
   assert.equal(n.pullQuotes[0].quote, "clashed with Thomas Edison");
   assert.match(n.closer, /never truly ended/);
 });
 
 test("narrative prompt forbids fabricating quotes and demands a closer", () => {
-  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0]);
+  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0], ANGLE);
   assert.match(system, /VERBATIM/);
   assert.match(system, /never fabricating/i);
   assert.match(system, /closer/i);
@@ -191,18 +229,18 @@ test("deconstruction prompt is told about reframed quotes and the closer", () =>
 
 test("generateNarrative throws when no usable body comes back", async () => {
   const fake = async () => "no json at all";
-  await assert.rejects(() => generateNarrative(provider, workFile, CATEGORIES[0], "English", fake), /usable article/);
+  await assert.rejects(() => generateNarrative(provider, workFile, CATEGORIES[0], ANGLE, "English", fake), /usable article/);
 });
 
 test("narrative prompt instructs the chosen language", () => {
-  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0], "Dutch (Nederlands)");
+  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0], ANGLE, "Dutch (Nederlands)");
   assert.match(system, /Dutch \(Nederlands\)/);
 });
 
 test("generateNarrative passes the language into the prompt", async () => {
   let captured;
   const fake = async (_p, system) => { captured = system; return '{"body":"x"}'; };
-  await generateNarrative(provider, workFile, CATEGORIES[0], "Spanish (Español)", fake);
+  await generateNarrative(provider, workFile, CATEGORIES[0], ANGLE, "Spanish (Español)", fake);
   assert.match(captured, /Spanish \(Español\)/);
 });
 

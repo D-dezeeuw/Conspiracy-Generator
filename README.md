@@ -25,15 +25,20 @@ bundler.
 
 ## How it works
 
-1. **Pick a subject** from a curated dropdown of long-deceased figures. There is no free-text name
-   entry — the list *is* the safety gate, so the engine can never be pointed at a living person.
+1. **Pick a target** from a curated dropdown of long-deceased figures and hit **Gather the sources**.
+   There is no free-text name entry — the list *is* the safety gate, so the engine can never be
+   pointed at a living person.
 2. The app gathers **real material from several keyless public sources, concurrently**: the
    Wikipedia REST summary (the bio), Wikipedia **related pages** (adjacent topics), and **Wikinews**
-   coverage. Each source is best-effort — if one is unavailable the run continues on the rest.
+   coverage. Each source is best-effort — if one is unavailable the run continues on the rest. The
+   gathered **source information** is shown.
 3. It assembles a **work-file** of real, sourced correlations — every one links back to its own
    checkable source URL (Wikipedia, Wikipedia-related, or Wikinews).
-4. An LLM picks the best-fit **conspiracy pattern** from a hand-authored dataset of archetypes, then
-   pauses so you can confirm or change the pattern **and choose the report language**.
+4. The run **pauses on the Conspiracy step**, where two orthogonal axes are pre-filled with the
+   engine's recommendation: an **Angle** (the thematic lens — Deep State, Secret Societies, Flat
+   Earth, UFO Cover-Up, … 20 in all) and a **Pattern** (the rhetorical fallacy — cherry-picking,
+   meaningful coincidence, hidden network, …). You can confirm or change either, pick the report
+   language, then press **Generate the report**.
 5. The LLM writes a **sensationalized article** that amplifies the *interpretation* of those facts
    without inventing any new ones, **in your chosen language**. Every claim is tagged with the real
    fact it rests on. Woven through it are **manufactured authority quotes** — real phrases pulled
@@ -58,7 +63,7 @@ app.js          UI state + flow wiring (imports "spektrum" from the CDN)
 engine.js       work-file → category match → narrative → deconstruction (language-aware)
 wikipedia.js    real source gathering: data sheet + related pages + Wikinews
 llm.js          direct browser → provider client + tolerant JSON parse
-data.js         curated subjects (the gate) + conspiracy archetypes + report languages
+data.js         curated subjects (the gate) + patterns + angles + report languages
 format.js       small pure text helper
 style.css       broadsheet styling
 spektrum.d.ts   vendored types for editor/jsconfig mapping (authoring only)

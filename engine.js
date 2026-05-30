@@ -11,7 +11,7 @@ import { gatherSources } from "./wikipedia.js";
  * @typedef {import("./wikipedia.js").DataSheet} DataSheet
  * @typedef {import("./llm.js").Provider} Provider
  * @typedef {{ fact: string, source: string, url: string }} Correlation
- * @typedef {{ categoryId: string, reasoning: string }} CategoryMatch
+ * @typedef {{ categoryId: string, angleId: string, reasoning: string }} CategoryMatch
  * @typedef {{ subject: Subject, dataSheet: DataSheet, correlations: Correlation[], match?: CategoryMatch }} WorkFile
  * @typedef {{ text: string, basedOn: string }} Claim
  * @typedef {{ quote: string, attributedTo: string, spin: string }} PullQuote
@@ -23,6 +23,11 @@ import { gatherSources } from "./wikipedia.js";
 /** @param {Category[]} categories @param {string} id */
 export function getCategory(categories, id) {
   return categories.find((c) => c.id === id);
+}
+
+/** @param {import("./data.js").Angle[]} angles @param {string} id */
+export function getAngle(angles, id) {
+  return angles.find((a) => a.id === id);
 }
 
 /**
@@ -70,17 +75,24 @@ export async function buildWorkFile(subject, fetchFn = fetch) {
 
 // --- Category match --------------------------------------------------------
 
-/** @param {WorkFile} workFile @param {Category[]} categories */
-export function buildMatchPrompt(workFile, categories) {
+/** @param {WorkFile} workFile @param {Category[]} categories @param {import("./data.js").Angle[]} angles */
+export function buildMatchPrompt(workFile, categories, angles) {
   const system = [
     "You are a pattern-matcher for a media-literacy demonstration.",
-    "Given real facts about a long-deceased historical figure and a list of conspiracy",
-    "narrative archetypes, pick the single archetype whose pattern best fits the facts.",
-    'Respond ONLY with JSON: {"categoryId": string, "reasoning": string}.',
+    "Given real facts about a long-deceased historical figure, pick the best-fitting",
+    "rhetorical PATTERN (the fallacy used) and the best-fitting thematic ANGLE (the",
+    "worldview/lens the story is told through). Choose the ones the real facts most",
+    "readily support.",
+    'Respond ONLY with JSON: {"categoryId": string, "angleId": string, "reasoning": string}.',
   ].join("\n");
 
-  const catalogue = categories
+  const patternList = categories
     .map((c) => `- id: ${c.id}\n  name: ${c.name}\n  patterns: ${c.correlation_patterns.join("; ")}`)
+    .join("\n");
+
+  const angleList = (angles || [])
+    .filter((a) => a.id !== "auto")
+    .map((a) => `- id: ${a.id}\n  name: ${a.name} — ${a.description}`)
     .join("\n");
 
   const facts = workFile.correlations.map((c) => `- ${c.fact}`).join("\n") ||
@@ -90,42 +102,73 @@ export function buildMatchPrompt(workFile, categories) {
     `Subject: ${workFile.subject.name}`,
     `\nReal facts / correlations:\n${facts}`,
     `\nExtract:\n${workFile.dataSheet.extract}`,
-    `\nArchetypes:\n${catalogue}`,
-    `\nReturn the best-fitting categoryId and a one-sentence reasoning.`,
+    `\nPATTERNS (rhetorical fallacy):\n${patternList}`,
+    `\nANGLES (thematic lens):\n${angleList}`,
+    `\nReturn the best-fitting categoryId, angleId, and a one-sentence reasoning.`,
   ].join("\n");
 
   return { system, user };
 }
 
 /**
- * Ask the LLM for the best category; always returns a valid, known id.
+ * Ask the LLM for the best pattern + angle; always returns valid, known ids.
  * @param {Provider} provider
  * @param {WorkFile} workFile
  * @param {Category[]} categories
+ * @param {import("./data.js").Angle[]} angles
  * @param {typeof chat} [chatFn]
  * @returns {Promise<CategoryMatch>}
  */
-export async function matchCategory(provider, workFile, categories, chatFn = chat) {
-  const { system, user } = buildMatchPrompt(workFile, categories);
+export async function matchCategory(provider, workFile, categories, angles, chatFn = chat) {
+  const { system, user } = buildMatchPrompt(workFile, categories, angles);
   const raw = await chatFn(provider, system, user);
   const parsed = parseJson(raw);
+
+  const angleList = angles || [];
+  const validAngle = parsed?.angleId && getAngle(angleList, parsed.angleId) && parsed.angleId !== "auto";
+  // First non-auto angle is the recommendation fallback.
+  const fallbackAngle = angleList.find((a) => a.id !== "auto")?.id || (angleList[0]?.id ?? "");
 
   if (parsed?.categoryId && getCategory(categories, parsed.categoryId)) {
     return {
       categoryId: parsed.categoryId,
+      angleId: validAngle ? parsed.angleId : fallbackAngle,
       reasoning: parsed.reasoning || "Best structural fit for the available facts.",
     };
   }
   return {
     categoryId: categories[0].id,
+    angleId: fallbackAngle,
     reasoning: "Defaulted to the first archetype (model did not return a valid match).",
   };
 }
 
 // --- Narrative generation --------------------------------------------------
 
-/** @param {WorkFile} workFile @param {Category} category @param {string} [language] */
-export function buildNarrativePrompt(workFile, category, language = "English") {
+/**
+ * Build the conspiracy-context block that steers generation. Exposed so the
+ * caller (and tests) can confirm the chosen angle + pattern context is present.
+ * @param {Category} category
+ * @param {import("./data.js").Angle} [angle]
+ * @returns {string}
+ */
+export function buildConspiracyContext(category, angle) {
+  const lines = [
+    `PATTERN to apply — ${category.name}: ${category.description}`,
+    `Pattern guidance: ${category.context}`,
+    `Fallacy it illustrates: ${category.fallacy_illustrated}`,
+  ];
+  if (angle && angle.id !== "auto") {
+    lines.push(
+      `ANGLE to tell it through — ${angle.name}: ${angle.description}`,
+      `Angle guidance: ${angle.context}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/** @param {WorkFile} workFile @param {Category} category @param {import("./data.js").Angle} [angle] @param {string} [language] */
+export function buildNarrativePrompt(workFile, category, angle, language = "English") {
   const system = [
     "You write a single sensationalized news-style article that frames real, sourced facts",
     "as if they prove a hidden causal conspiracy. This is a media-literacy exercise.",
@@ -134,14 +177,17 @@ export function buildNarrativePrompt(workFile, category, language = "English") {
     "2. You amplify INTERPRETATION and insinuation, not facts.",
     "3. Every entry in `claims` must reference, in `basedOn`, which provided fact it is built on.",
     "4. The subject is a long-deceased historical figure; treat this purely as a study in rhetoric.",
-    `5. Write ALL output text in ${language}. The JSON keys stay in English; only the values are in ${language}. Proper names may keep their original spelling.`,
-    "6. PULL QUOTES (manufactured authority): in `pullQuotes`, ONLY use phrases that appear VERBATIM in",
+    "5. Apply the PATTERN (the fallacy/mechanism) and tell the story through the ANGLE (the thematic",
+    "   lens) given in the CONSPIRACY CONTEXT below. Commit fully to that angle's worldview while still",
+    "   inventing no facts — the angle steers interpretation, never evidence.",
+    `6. Write ALL output text in ${language}. The JSON keys stay in English; only the values are in ${language}. Proper names may keep their original spelling.`,
+    "7. PULL QUOTES (manufactured authority): in `pullQuotes`, ONLY use phrases that appear VERBATIM in",
     "   the supplied source extract. Quote the words EXACTLY — never alter, paraphrase, translate, or",
     "   invent a quote. `attributedTo` must be the real person/source the extract attributes it to (or",
     "   the subject). `spin` is your ominous out-of-context gloss that makes the innocent quote sound",
     "   damning. The trick is FRAMING a real quote, never fabricating one. If the extract contains no",
     "   quotable phrase, return an empty `pullQuotes` array — do not manufacture one.",
-    "7. CLOSER: `closer` is the article's final passage — an 'and it never really ended' hook that",
+    "8. CLOSER: `closer` is the article's final passage — an 'and it never really ended' hook that",
     "   implies the same hidden pattern persists to this day. It must insinuate continuation WITHOUT",
     "   asserting any new fact, date, or present-day event. Rhetoric only.",
     'Respond ONLY with JSON: {"headline": string, "subhead": string, "body": string, "claims": [{"text": string, "basedOn": string}], "pullQuotes": [{"quote": string, "attributedTo": string, "spin": string}], "closer": string}.',
@@ -151,8 +197,7 @@ export function buildNarrativePrompt(workFile, category, language = "English") {
     "[F1] (no notable associations were found; rely only on the extract)";
 
   const user = [
-    `Archetype to apply: ${category.name} — ${category.description}`,
-    `Fallacy it illustrates: ${category.fallacy_illustrated}`,
+    `=== CONSPIRACY CONTEXT ===\n${buildConspiracyContext(category, angle)}`,
     `\nSubject: ${workFile.subject.name}`,
     `\nProvided facts:\n${facts}`,
     `\nSource extract (do not exceed these facts):\n${workFile.dataSheet.extract}`,
@@ -166,12 +211,20 @@ export function buildNarrativePrompt(workFile, category, language = "English") {
  * @param {Provider} provider
  * @param {WorkFile} workFile
  * @param {Category} category
+ * @param {import("./data.js").Angle} [angle]
  * @param {string} [language]
  * @param {typeof chat} [chatFn]
  * @returns {Promise<Narrative>}
  */
-export async function generateNarrative(provider, workFile, category, language = "English", chatFn = chat) {
-  const { system, user } = buildNarrativePrompt(workFile, category, language);
+export async function generateNarrative(provider, workFile, category, angle, language = "English", chatFn = chat) {
+  const { system, user } = buildNarrativePrompt(workFile, category, angle, language);
+  // Guard: the chosen pattern + angle context MUST actually reach the model.
+  if (!user.includes(category.context)) {
+    throw new Error("Internal: pattern context missing from the generation prompt.");
+  }
+  if (angle && angle.id !== "auto" && !user.includes(angle.context)) {
+    throw new Error("Internal: angle context missing from the generation prompt.");
+  }
   const raw = await chatFn(provider, system, user);
   const parsed = parseJson(raw);
   if (!parsed || typeof parsed.body !== "string") {
