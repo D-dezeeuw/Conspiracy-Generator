@@ -67,36 +67,51 @@ export function resolveByNameOrId(query, items, nameOf) {
  * Parse a query string (e.g. "?target=nicola+tesla&angle=religious/occult")
  * into prefilled selections. Only keys that resolve are returned.
  *
+ * Hidden dev escape hatch: `&unlock=1` skips the fuzzy resolver and passes the
+ * raw URL values straight through as ids — handy for testing exact ids before
+ * they're wired into the codebase. This is "security by obscurity," a soft
+ * convenience layer ONLY. The real living-person safety gate is unaffected:
+ * the actual run still requires a curated Subject (with a Wikipedia title), so
+ * a raw `target` that isn't a curated id simply no-ops downstream.
+ *
  * @param {string} search  location.search (with or without leading "?").
  * @param {{ SUBJECTS: any[], ANGLES: any[], CATEGORIES: any[], LANGUAGES: any[] }} data
- * @returns {{ subjectId?: string, angleId?: string, categoryId?: string, langId?: string }}
+ * @returns {{ subjectId?: string, angleId?: string, categoryId?: string, langId?: string, unlocked?: boolean }}
  */
 export function resolveParams(search, data) {
   const params = new URLSearchParams(search || "");
   const out = {};
+  const unlocked = params.get("unlock") === "1";
+  if (unlocked) out.unlocked = true;
+
+  // In unlocked mode, take the raw value as-is; otherwise fuzzy-resolve it.
+  const pick = (raw, items, nameOf) => {
+    if (raw == null || raw === "") return null;
+    return unlocked ? raw.trim() : resolveByNameOrId(raw, items, nameOf);
+  };
 
   const target = params.get("target");
   if (target) {
-    const id = resolveByNameOrId(target, data.SUBJECTS, (s) => s.name);
+    const id = pick(target, data.SUBJECTS, (s) => s.name);
     if (id) out.subjectId = id; // unresolved target is ignored (safety gate)
   }
 
   const angle = params.get("angle");
   if (angle) {
-    const id = resolveByNameOrId(angle, data.ANGLES, (a) => a.name);
+    const id = pick(angle, data.ANGLES, (a) => a.name);
     if (id) out.angleId = id;
   }
 
   // Accept both `pattern` and `category` as the pattern key.
   const pattern = params.get("pattern") || params.get("category");
   if (pattern) {
-    const id = resolveByNameOrId(pattern, data.CATEGORIES, (c) => c.name);
+    const id = pick(pattern, data.CATEGORIES, (c) => c.name);
     if (id) out.categoryId = id;
   }
 
   const lang = params.get("lang") || params.get("language");
   if (lang) {
-    const id = resolveByNameOrId(lang, data.LANGUAGES, (l) => l.name);
+    const id = pick(lang, data.LANGUAGES, (l) => l.name);
     if (id) out.langId = id;
   }
 

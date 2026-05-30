@@ -55,3 +55,33 @@ test("resolveParams returns an empty object when nothing is provided", () => {
   assert.deepEqual(resolveParams("", data), {});
   assert.deepEqual(resolveParams("?foo=bar", data), {});
 });
+
+test("unlock=1 skips fuzzy resolution and passes raw values through as ids", () => {
+  // A brand-new id not yet in the codebase still comes through verbatim.
+  const out = resolveParams("?unlock=1&target=future_subject&angle=new_angle&pattern=new_pattern&lang=xx", data);
+  assert.equal(out.unlocked, true);
+  assert.equal(out.subjectId, "future_subject");
+  assert.equal(out.angleId, "new_angle");
+  assert.equal(out.categoryId, "new_pattern");
+  assert.equal(out.langId, "xx");
+});
+
+test("unlock=1 takes values verbatim — no fuzzy correction", () => {
+  // Locked mode would map "nicola tesla" -> "tesla"; unlocked keeps it raw.
+  const locked = resolveParams("?target=nicola+tesla", data);
+  assert.equal(locked.subjectId, "tesla");
+  const unlocked = resolveParams("?unlock=1&target=nicola+tesla", data);
+  assert.equal(unlocked.subjectId, "nicola tesla");
+});
+
+test("unlock is only triggered by exactly '1' (obscure by design)", () => {
+  assert.ok(!resolveParams("?unlock=true&target=foo", data).unlocked);
+  assert.ok(!resolveParams("?unlock=0&target=foo", data).unlocked);
+  // Without unlock, an unknown raw target is dropped (gate holds).
+  assert.ok(!("subjectId" in resolveParams("?unlock=true&target=future_subject", data)));
+});
+
+test("unlock=1 trims raw values but an empty target is still ignored", () => {
+  assert.equal(resolveParams("?unlock=1&target=%20%20edison%20%20", data).subjectId, "edison");
+  assert.ok(!("subjectId" in resolveParams("?unlock=1&target=", data)));
+});
