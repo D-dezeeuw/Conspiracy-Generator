@@ -10,6 +10,7 @@ import {
   generateNarrative,
   deconstruct,
   getCategory,
+  verifyPullQuotes,
 } from "../engine.js";
 import { CATEGORIES } from "../data.js";
 
@@ -120,6 +121,72 @@ test("generateNarrative normalizes and keeps only well-formed claims", async () 
   const n = await generateNarrative(provider, workFile, CATEGORIES[0], "English", fake);
   assert.equal(n.headline, "The Pattern");
   assert.deepEqual(n.claims, [{ text: "claim a", basedOn: "F1" }]);
+  // New fields default cleanly when the model omits them.
+  assert.deepEqual(n.pullQuotes, []);
+  assert.equal(n.closer, "");
+});
+
+test("verifyPullQuotes keeps only quotes verbatim in the extract", () => {
+  const extract = 'Nikola Tesla clashed with Thomas Edison in New York.';
+  const kept = verifyPullQuotes([
+    { quote: "clashed with Thomas Edison", attributedTo: "Wikipedia", spin: "a war, not a rivalry" },
+    { quote: "secretly plotted to destroy", attributedTo: "Anon", spin: "fabricated" },
+    { quote: "in New York", spin: "the scene of it all" },
+  ], extract);
+  assert.equal(kept.length, 2);
+  assert.equal(kept[0].quote, "clashed with Thomas Edison");
+  assert.equal(kept[1].attributedTo, ""); // missing attribution coerced to ""
+  assert.ok(!kept.some((q) => q.quote.includes("secretly plotted")), "fabricated quote dropped");
+});
+
+test("verifyPullQuotes tolerates curly quotes and whitespace but blocks fabrication", () => {
+  const extract = "He said the work was unfinished.";
+  const kept = verifyPullQuotes([
+    { quote: "“the   work was unfinished”", attributedTo: "x", spin: "ominous" },
+    { quote: "the work was buried", attributedTo: "x", spin: "made up" },
+  ], extract);
+  assert.equal(kept.length, 1);
+  assert.match(kept[0].quote, /the work was unfinished/);
+});
+
+test("verifyPullQuotes returns [] for non-arrays and too-short quotes", () => {
+  assert.deepEqual(verifyPullQuotes(undefined, "anything"), []);
+  assert.deepEqual(verifyPullQuotes([{ quote: "a", spin: "s" }], "a b c"), []);
+});
+
+test("generateNarrative filters fabricated pull quotes and keeps the closer", async () => {
+  const fake = async () =>
+    JSON.stringify({
+      body: "b",
+      pullQuotes: [
+        { quote: "clashed with Thomas Edison", attributedTo: "WP", spin: "war" },
+        { quote: "ordered the assassination", attributedTo: "WP", spin: "invented" },
+      ],
+      closer: "And the pattern never truly ended.",
+    });
+  const n = await generateNarrative(provider, workFile, CATEGORIES[0], "English", fake);
+  assert.equal(n.pullQuotes.length, 1, "only the verbatim quote survives");
+  assert.equal(n.pullQuotes[0].quote, "clashed with Thomas Edison");
+  assert.match(n.closer, /never truly ended/);
+});
+
+test("narrative prompt forbids fabricating quotes and demands a closer", () => {
+  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0]);
+  assert.match(system, /VERBATIM/);
+  assert.match(system, /never fabricating/i);
+  assert.match(system, /closer/i);
+});
+
+test("deconstruction prompt is told about reframed quotes and the closer", () => {
+  const narrative = {
+    headline: "H", subhead: "S", body: "B", claims: [],
+    pullQuotes: [{ quote: "clashed with Thomas Edison", attributedTo: "WP", spin: "war" }],
+    closer: "It never ended.",
+  };
+  const { system, user } = buildDeconstructionPrompt(narrative, workFile);
+  assert.match(system, /out of context|continuation/i);
+  assert.match(user, /clashed with Thomas Edison/);
+  assert.match(user, /never ended/);
 });
 
 test("generateNarrative throws when no usable body comes back", async () => {
