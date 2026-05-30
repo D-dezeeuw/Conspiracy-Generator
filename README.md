@@ -88,6 +88,14 @@ default. **A `target` that doesn't match a curated figure is ignored** — the U
 back door around the safety gate. A URL-pinned angle/pattern is respected and not overwritten by the
 engine's recommendation.
 
+### Dev escape hatch: `&unlock=1`
+
+Adding `&unlock=1` **skips the fuzzy resolver** and passes the raw URL values straight through as
+ids. It's a convenience for testing exact ids (e.g. a new angle or pattern) before they're wired into
+the dropdowns — security by obscurity, a soft layer only. It does **not** weaken the real gate: a run
+still requires a curated subject (with a Wikipedia title), so a raw `target` that isn't a curated id
+simply no-ops. Example: `?unlock=1&target=tesla&angle=mind_control&pattern=stolen_legacy`.
+
 ## Develop & test
 
 ```bash
