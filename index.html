@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="The Correlation Engine — an educational demonstration of why correlation is not causation."
+    />
+    <title>The Correlation Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;0,800;1,400&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+
+    <!-- Spektrum from CDN. Pin the version for production. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "spektrum": "https://unpkg.com/spektrum@1.0.1"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app" data-cloak>
+      <header class="masthead">
+        <div class="kicker">A Media-Literacy Demonstration</div>
+        <h1>The Correlation Engine</h1>
+        <p class="dek">
+          How true facts are arranged into a false story of hidden causation — and how to spot the trick.
+        </p>
+      </header>
+
+      <div class="banner">
+        <strong>⚠ This is a demonstration.</strong> Every article below is
+        <strong>deliberately fallacious</strong>. It takes real, sourced facts about a long-deceased
+        figure and amplifies the <em>interpretation</em> to fake a chain of causation. Nothing it
+        prints is a factual claim. The reveal panel names exactly how it cheats.
+      </div>
+
+      <section class="card">
+        <h2>1 · Provider (bring your own key)</h2>
+        <div class="field">
+          <label for="baseUrl">Base URL</label>
+          <input id="baseUrl" type="text" spellcheck="false" data-model="baseUrl" />
+        </div>
+        <div class="field">
+          <label for="model">Model</label>
+          <input id="model" type="text" spellcheck="false" data-model="model" />
+        </div>
+        <div class="field">
+          <label for="apiKey">API key</label>
+          <input
+            id="apiKey"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="sk-..."
+            data-model="apiKey"
+          />
+          <div class="hint">
+            Held in this tab's memory only. Base URL + model are remembered; the key is never stored
+            or logged.
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>2 · Subject (the safety gate)</h2>
+        <div class="field">
+          <label for="subject">Long-deceased historical figure</label>
+          <select id="subject" data-model="subjectId"></select>
+          <p class="rationale">{{rationale}}</p>
+          <div class="hint">
+            No free-text entry by design — the curated list is what keeps this engine off living
+            people.
+          </div>
+        </div>
+        <button class="primary" data-action="click" data-fn="runEngine" :disabled="busy">
+          Run the engine
+        </button>
+        <div :class="statusClass">{{status}}</div>
+      </section>
+
+      <!-- Exhibit: the work-file of real, sourced facts -->
+      <section class="card exhibit" data-if="hasMatch">
+        <h2>Exhibit · The work-file (real, sourced facts)</h2>
+        <ul>
+          <template data-each="correlations" data-as="cor">
+            <li>
+              {{cor.fact}}
+              <span class="src"><a :href="cor.url" target="_blank" rel="noopener">{{cor.source}} ↗</a></span>
+            </li>
+          </template>
+        </ul>
+      </section>
+
+      <!-- Intermediary step: choose the conspiracy pattern (best match preselected) -->
+      <section class="card choice" data-if="hasCategoryChoice">
+        <h2>3 · Choose the conspiracy pattern</h2>
+        <p class="match-note">
+          Recommended: <span class="cat">{{matchName}}</span>
+          <span class="badge" data-if="isRecommended">best match</span><br />
+          Why we think it fits: {{matchReason}}
+        </p>
+        <div class="field">
+          <label for="category">Conspiracy pattern to apply</label>
+          <select id="category" data-model="categoryId"></select>
+        </div>
+        <p class="rationale">{{selCatDescription}}</p>
+        <p class="match-note">Fallacy it illustrates: <em>{{selCatFallacy}}</em></p>
+        <div class="field">
+          <label for="language">Report language</label>
+          <select id="language" data-model="langId"></select>
+          <div class="hint">The article and the reveal are written in this language. Sources stay as published.</div>
+        </div>
+        <button class="primary" data-action="click" data-fn="continueEngine" :disabled="busy">
+          Continue →
+        </button>
+        <div :class="statusClass">{{status}}</div>
+      </section>
+
+      <!-- The generated article -->
+      <article class="article" data-if="hasArticle">
+        <span class="label">Deliberately Fallacious · Demonstration</span>
+        <h2 class="headline">{{articleHeadline}}</h2>
+        <p class="subhead" data-if="articleSubhead">{{articleSubhead}}</p>
+        <div class="body">
+          <template data-each="bodyParas" data-as="para">
+            <p>{{para}}</p>
+          </template>
+        </div>
+        <p class="match-note">
+          Source of every underlying fact:
+          <a :href="sourceUrl" target="_blank" rel="noopener">Wikipedia ↗</a>
+        </p>
+      </article>
+
+      <!-- Claims traced to their facts -->
+      <section class="card" data-if="claims.length">
+        <h2>Claims, traced to their facts</h2>
+        <template data-each="claims" data-as="c">
+          <div class="claim">
+            {{c.text}}<span class="based">↳ based on: {{c.basedOn}}</span>
+          </div>
+        </template>
+      </section>
+
+      <!-- The reveal -->
+      <section class="card reveal" data-if="hasReveal">
+        <h2>The reveal · How the trick was done</h2>
+        <p class="summary">{{revealSummary}}</p>
+        <template data-each="moves" data-as="m">
+          <div class="move">
+            <span class="name">{{m.move}}</span>
+            <span class="fallacy">Fallacy: {{m.fallacy}}</span>
+          </div>
+        </template>
+      </section>
+
+      <footer>
+        The Correlation Engine · correlation ≠ causation · sources are real, the conclusions are not.
+        <br />Built with <a href="https://www.npmjs.com/package/spektrum" target="_blank" rel="noopener">Spektrum</a>, no build step.
+      </footer>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
