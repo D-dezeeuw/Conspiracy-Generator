@@ -5,7 +5,7 @@
 
 import { setValue, computed, addSystem, defineFn, bindDOM, run } from "spektrum";
 import { SUBJECTS, CATEGORIES, ANGLES, LANGUAGES } from "./data.js";
-import { buildWorkFile, matchCategory, generateNarrative, deconstruct, getCategory, getAngle } from "./engine.js";
+import { buildWorkFile, matchCategory, generateNarrative, deconstruct, getCategory, getAngle, SECTIONS } from "./engine.js";
 import { toParagraphs } from "./format.js";
 
 const DEFAULTS = { baseUrl: "https://openrouter.ai/api/v1", model: "tencent/hy3-preview" };
@@ -61,9 +61,10 @@ setValue("matchName", "");
 setValue("matchAngleName", "");
 setValue("matchReason", "");
 setValue("hasArticle", false);
+setValue("articleKicker", "");
 setValue("articleHeadline", "");
 setValue("articleSubhead", "");
-setValue("bodyParas", []);
+setValue("reportSections", []);
 setValue("pullQuotes", []);
 setValue("closer", "");
 setValue("claims", []);
@@ -119,7 +120,7 @@ function providerFrom(state) {
 
 function clearGenerated() {
   setValue("hasArticle", false);
-  setValue("bodyParas", []);
+  setValue("reportSections", []);
   setValue("pullQuotes", []);
   setValue("closer", "");
   setValue("claims", []);
@@ -208,9 +209,13 @@ defineFn(
       const through = angle.id !== "auto" ? ` through the “${angle.name}” angle` : "";
       setValue("status", `Generating the (deliberately fallacious) article as “${category.name}”${through} in ${language}…`);
       const narrative = await generateNarrative(provider, currentWorkFile, category, angle, language);
+      setValue("articleKicker", narrative.kicker);
       setValue("articleHeadline", narrative.headline);
       setValue("articleSubhead", narrative.subhead);
-      setValue("bodyParas", toParagraphs(narrative.body));
+      // The fixed tabloid arc → one renderable block per non-empty section.
+      setValue("reportSections", SECTIONS
+        .map((s) => ({ label: s.label, paras: toParagraphs(narrative.sections[s.key]) }))
+        .filter((s) => s.paras.length));
       setValue("pullQuotes", narrative.pullQuotes);
       setValue("closer", narrative.closer);
       setValue("claims", narrative.claims);

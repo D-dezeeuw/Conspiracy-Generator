@@ -15,10 +15,27 @@ import { gatherSources } from "./wikipedia.js";
  * @typedef {{ subject: Subject, dataSheet: DataSheet, correlations: Correlation[], match?: CategoryMatch }} WorkFile
  * @typedef {{ text: string, basedOn: string }} Claim
  * @typedef {{ quote: string, attributedTo: string, spin: string }} PullQuote
- * @typedef {{ headline: string, subhead: string, body: string, claims: Claim[], pullQuotes: PullQuote[], closer: string }} Narrative
+ * @typedef {{ intro: string, setup: string, deepDive: string, reveal: string, fingerPointing: string, nameAndShame: string }} Sections
+ * @typedef {{ kicker: string, headline: string, subhead: string, sections: Sections, claims: Claim[], pullQuotes: PullQuote[], closer: string }} Narrative
  * @typedef {{ move: string, fallacy: string }} DeconstructionMove
  * @typedef {{ summary: string, moves: DeconstructionMove[] }} Deconstruction
  */
+
+/**
+ * The enforced tabloid article arc — ordered, named sections the report body
+ * is always built from. Each carries a reader-facing `label` and the authoring
+ * `guidance` injected into the generation prompt. The renderer walks this list
+ * in order; the schema and the reveal both understand the same keys.
+ * @type {{ key: keyof Sections, label: string, guidance: string }[]}
+ */
+export const SECTIONS = [
+  { key: "intro", label: "The Hook", guidance: "Open mid-scandal with the single most sensational claim. No context yet — grab the reader first. One or two breathless paragraphs." },
+  { key: "setup", label: "The Official Story", guidance: "Lay out the innocent, accepted version of events using the real facts. This calm baseline is what the rest will appear to shatter — make it sound reasonable so the twist lands." },
+  { key: "deepDive", label: "The Evidence", guidance: "The body of the case. Walk through the real correlations one by one, each reframed as suspicious. 'But look closer…' This is where the buried-facts feel piles up." },
+  { key: "reveal", label: "Connect the Dots", guidance: "The turn. Tie the scattered 'evidence' into one supposed hidden pattern. 'Put it all together, and a chilling picture emerges.' The fallacy does its work here." },
+  { key: "fingerPointing", label: "Who Benefited?", guidance: "Name who supposedly gained and therefore must be behind it. Assign hidden motive and intent — insinuate, do not yet declare. 'And who profited from all this?'" },
+  { key: "nameAndShame", label: "The Verdict", guidance: "Deliver the accusation as if settled fact. Name the culprit(s) or forces and pass judgment. The confident conclusion the whole article was built to earn." },
+];
 
 /** @param {Category[]} categories @param {string} id */
 export function getCategory(categories, id) {
@@ -169,9 +186,12 @@ export function buildConspiracyContext(category, angle) {
 
 /** @param {WorkFile} workFile @param {Category} category @param {import("./data.js").Angle} [angle] @param {string} [language] */
 export function buildNarrativePrompt(workFile, category, angle, language = "English") {
+  const sectionSpec = SECTIONS.map((s) => `  - "${s.key}" (${s.label}): ${s.guidance}`).join("\n");
+  const sectionKeys = SECTIONS.map((s) => `"${s.key}": string`).join(", ");
+
   const system = [
-    "You write a single sensationalized news-style article that frames real, sourced facts",
-    "as if they prove a hidden causal conspiracy. This is a media-literacy exercise.",
+    "You write a TABLOID exposé that frames real, sourced facts as if they prove a hidden causal",
+    "conspiracy. This is a media-literacy exercise.",
     "STRICT RULES:",
     "1. You may ONLY use the facts provided. Do NOT invent events, dates, names, quotes, or documents.",
     "2. You amplify INTERPRETATION and insinuation, not facts.",
@@ -181,16 +201,21 @@ export function buildNarrativePrompt(workFile, category, angle, language = "Engl
     "   lens) given in the CONSPIRACY CONTEXT below. Commit fully to that angle's worldview while still",
     "   inventing no facts — the angle steers interpretation, never evidence.",
     `6. Write ALL output text in ${language}. The JSON keys stay in English; only the values are in ${language}. Proper names may keep their original spelling.`,
-    "7. PULL QUOTES (manufactured authority): in `pullQuotes`, ONLY use phrases that appear VERBATIM in",
+    "7. TABLOID VOICE: breathless, urgent, emotionally loaded. Dramatic verbs (slammed, erupted, sent",
+    "   shockwaves). Short punchy paragraphs. Rhetorical questions that imply guilt without asserting it.",
+    "8. STRUCTURE: the article body is a fixed arc of named sections. Fill EVERY section, in this role:",
+    sectionSpec,
+    "   `kicker` is a short ALL-CAPS overline label (e.g. WORLD EXCLUSIVE, BOMBSHELL). `headline` is the",
+    "   screaming title. `subhead` is one dramatic teaser line under it.",
+    "9. PULL QUOTES (manufactured authority): in `pullQuotes`, ONLY use phrases that appear VERBATIM in",
     "   the supplied source extract. Quote the words EXACTLY — never alter, paraphrase, translate, or",
     "   invent a quote. `attributedTo` must be the real person/source the extract attributes it to (or",
     "   the subject). `spin` is your ominous out-of-context gloss that makes the innocent quote sound",
     "   damning. The trick is FRAMING a real quote, never fabricating one. If the extract contains no",
     "   quotable phrase, return an empty `pullQuotes` array — do not manufacture one.",
-    "8. CLOSER: `closer` is the article's final passage — an 'and it never really ended' hook that",
-    "   implies the same hidden pattern persists to this day. It must insinuate continuation WITHOUT",
-    "   asserting any new fact, date, or present-day event. Rhetoric only.",
-    'Respond ONLY with JSON: {"headline": string, "subhead": string, "body": string, "claims": [{"text": string, "basedOn": string}], "pullQuotes": [{"quote": string, "attributedTo": string, "spin": string}], "closer": string}.',
+    "10. CLOSER: `closer` is the article's final sign-off — an 'and it never really ended' hook that",
+    "    implies the pattern persists today. Insinuate continuation WITHOUT asserting any new fact. Rhetoric only.",
+    `Respond ONLY with JSON: {"kicker": string, "headline": string, "subhead": string, "sections": {${sectionKeys}}, "claims": [{"text": string, "basedOn": string}], "pullQuotes": [{"quote": string, "attributedTo": string, "spin": string}], "closer": string}.`,
   ].join("\n");
 
   const facts = workFile.correlations.map((c, i) => `[F${i + 1}] ${c.fact}`).join("\n") ||
@@ -201,7 +226,7 @@ export function buildNarrativePrompt(workFile, category, angle, language = "Engl
     `\nSubject: ${workFile.subject.name}`,
     `\nProvided facts:\n${facts}`,
     `\nSource extract (do not exceed these facts):\n${workFile.dataSheet.extract}`,
-    `\nWrite the article now. Make the framing maximally convincing while inventing nothing.`,
+    `\nWrite the tabloid article now, filling every section in order. Make the framing maximally convincing while inventing nothing.`,
   ].join("\n");
 
   return { system, user };
@@ -227,19 +252,48 @@ export async function generateNarrative(provider, workFile, category, angle, lan
   }
   const raw = await chatFn(provider, system, user);
   const parsed = parseJson(raw);
-  if (!parsed || typeof parsed.body !== "string") {
+  const sections = normalizeSections(parsed);
+  if (!parsed || !sections) {
     throw new Error("The model did not return a usable article. Try regenerating.");
   }
   return {
+    kicker: typeof parsed.kicker === "string" ? parsed.kicker : "",
     headline: parsed.headline || "An Untold Pattern Emerges",
     subhead: parsed.subhead || "",
-    body: parsed.body,
+    sections,
     claims: Array.isArray(parsed.claims)
       ? parsed.claims.filter((c) => c && typeof c.text === "string" && typeof c.basedOn === "string")
       : [],
     pullQuotes: verifyPullQuotes(parsed.pullQuotes, workFile.dataSheet.extract),
     closer: typeof parsed.closer === "string" ? parsed.closer : "",
   };
+}
+
+/**
+ * Coerce a model response into the fixed Sections shape. Returns null only when
+ * there's nothing usable at all (no sections and no legacy body). If the model
+ * returns the old single `body`, it lands in `deepDive` so nothing is lost.
+ * @param {any} parsed
+ * @returns {Sections|null}
+ */
+export function normalizeSections(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const src = parsed.sections && typeof parsed.sections === "object" ? parsed.sections : {};
+  /** @type {Sections} */
+  const out = { intro: "", setup: "", deepDive: "", reveal: "", fingerPointing: "", nameAndShame: "" };
+  let any = false;
+  for (const { key } of SECTIONS) {
+    if (typeof src[key] === "string" && src[key].trim()) {
+      out[key] = src[key].trim();
+      any = true;
+    }
+  }
+  // Back-compat: a flat `body` (or an empty section set) falls into deepDive.
+  if (!any && typeof parsed.body === "string" && parsed.body.trim()) {
+    out.deepDive = parsed.body.trim();
+    any = true;
+  }
+  return any ? out : null;
 }
 
 /** Normalize a quoted phrase for substring matching: strip surrounding
@@ -282,14 +336,25 @@ export function verifyPullQuotes(raw, extract) {
 
 // --- Deconstruction (the reveal) -------------------------------------------
 
+/** Flatten the narrative's ordered sections into labeled text. */
+export function sectionsToText(sections) {
+  if (!sections) return "";
+  return SECTIONS
+    .map((s) => (sections[s.key] ? `[${s.label}]\n${sections[s.key]}` : ""))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 /** @param {Narrative} narrative @param {WorkFile} workFile @param {string} [language] */
 export function buildDeconstructionPrompt(narrative, workFile, language = "English") {
   const system = [
-    "You are a media-literacy analyst. Given a conspiracy-style article and the real facts",
+    "You are a media-literacy analyst. Given a tabloid conspiracy article and the real facts",
     "behind it, explain how it manufactured the impression of causation from mere correlation.",
-    "If the article reframes real quotes out of context, or ends on an 'it never ended' hook,",
-    "call those out explicitly as named techniques (e.g. quoting out of context; unfalsifiable",
-    "continuation). Make sure every persuasive device the article used appears in `moves`.",
+    "The article is built from labeled tabloid sections. Walk them in order and, for each, name the",
+    "trick it played — e.g. the Official Story builds false trust; the Evidence cherry-picks; Connect",
+    "the Dots manufactures a pattern from coincidence; Who Benefited uses cui-bono as proof; the",
+    "Verdict states as fact what was never shown. Also flag quoting out of context and the",
+    "unfalsifiable 'it never ended' continuation. Every persuasive device used must appear in `moves`.",
     `Write all output text (summary and every move/fallacy) in ${language}. JSON keys stay in English.`,
     'Respond ONLY with JSON: {"summary": string, "moves": [{"move": string, "fallacy": string}]}.',
   ].join("\n");
@@ -302,7 +367,7 @@ export function buildDeconstructionPrompt(narrative, workFile, language = "Engli
   const user = [
     `Article headline: ${narrative.headline}`,
     `Subhead: ${narrative.subhead}`,
-    `\nArticle body:\n${narrative.body}`,
+    `\nArticle sections:\n${sectionsToText(narrative.sections)}`,
     narrative.closer ? `\nClosing 'it never ended' passage:\n${narrative.closer}` : "",
     `\nReframed real quotes used as authority:\n${quotes}`,
     `\nThe real facts it was built from:\n${facts}`,

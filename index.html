@@ -134,16 +134,16 @@
       </section>
 
       <!-- The generated article -->
-      <article class="article" data-if="hasArticle">
+      <article class="article tabloid" data-if="hasArticle">
         <span class="label">Deliberately Fallacious · Demonstration</span>
+        <p class="kicker-overline" data-if="articleKicker">{{articleKicker}}</p>
         <h2 class="headline">{{articleHeadline}}</h2>
         <p class="subhead" data-if="articleSubhead">{{articleSubhead}}</p>
         <div class="body">
           <!-- Manufactured authority quotes: real words, ominous framing.
-               Floated so they sit throughout the running text. Wrapped in
-               their own layer because sibling data-each templates can't share
-               a parent (the first marks it; the second is skipped). The layer
-               is display:contents so the floats still reference the body. -->
+               Floated so they sit throughout the running text. Each data-each
+               lives in its own display:contents layer because a bare template
+               marks its parent as a host, which would skip sibling bindings. -->
           <div class="quotes-layer">
             <template data-each="pullQuotes" data-as="q">
               <blockquote class="pull">
@@ -153,9 +153,17 @@
               </blockquote>
             </template>
           </div>
-          <div class="paras-layer">
-            <template data-each="bodyParas" data-as="para">
-              <p>{{para}}</p>
+          <!-- The enforced tabloid arc: one labeled section per beat, in order. -->
+          <div class="sections-layer">
+            <template data-each="reportSections" data-as="sec">
+              <section class="report-section">
+                <h3 class="section-label">{{sec.label}}</h3>
+                <div class="section-paras">
+                  <template data-each="sec.paras" data-as="para">
+                    <p>{{para}}</p>
+                  </template>
+                </div>
+              </section>
             </template>
           </div>
           <p class="closer" data-if="closer">{{closer}}</p>
