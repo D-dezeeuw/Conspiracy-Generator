@@ -9,52 +9,60 @@ logical fallacy it relies on.
 > fallacious*. It exists to show how easily real, true facts can be arranged into a false story of
 > hidden causation. Nothing it outputs should be taken as a factual claim.
 
+## No build step, no dependencies
+
+This is a plain static site — open `index.html` and it runs. There is **nothing to install or
+build**:
+
+- ES modules loaded directly by the browser.
+- The UI is wired with [**Spektrum**](https://www.npmjs.com/package/spektrum), a tiny zero-dependency
+  reactive engine with declarative HTML bindings, pulled from a CDN via an import map.
+- TypeScript editor support comes from a vendored `spektrum.d.ts` + `jsconfig.json` — used for
+  authoring only, never at runtime.
+
+Because it's just static files, **serving it from a branch is enough** — no GitHub Actions, no
+bundler.
+
 ## How it works
 
-1. **Pick a subject** from a curated list of long-deceased historical figures. There is no
-   free-text name entry — the list *is* the safety gate, so the engine can never be pointed at a
-   living person.
-2. The app fetches a **real Wikipedia data sheet** for that figure (client-side, public REST API).
-3. It assembles a **work-file** of real, sourced correlations — every correlation links back to its
-   Wikipedia source.
-4. An LLM picks the best-fit **conspiracy pattern** from a hand-authored dataset of false-causation
-   archetypes.
+1. **Pick a subject** from a curated dropdown of long-deceased figures. There is no free-text name
+   entry — the list *is* the safety gate, so the engine can never be pointed at a living person.
+2. The app fetches a **real Wikipedia data sheet** (client-side, public REST API).
+3. It assembles a **work-file** of real, sourced correlations — each links back to its Wikipedia
+   source.
+4. An LLM picks the best-fit **conspiracy pattern** from a hand-authored dataset of archetypes.
 5. The LLM writes a **sensationalized article** that amplifies the *interpretation* of those facts
-   — without inventing any new ones. Every claim is tagged with the real fact it rests on.
-6. A **deconstruction panel** then names each persuasive move and the fallacy it illustrates.
+   without inventing any new ones. Every claim is tagged with the real fact it rests on.
+6. A **deconstruction panel** names each persuasive move and the fallacy it illustrates.
 
-## Architecture
-
-- **Static site**, no backend. Vite + TypeScript, deployed to GitHub Pages.
-- **Bring-your-own-key.** The browser calls an OpenAI-compatible endpoint (OpenRouter by default)
-  directly. The key is held in the tab only — never persisted, never logged, never sent to a server
-  we control.
+## Files
 
 ```
-data/subjects.json   -> curated subject pool (the gate)
-data/categories.json -> hand-authored conspiracy "pattern" dataset
-src/wikipedia.ts     -> fetches the real data sheet
-src/engine.ts        -> work-file -> match -> narrative -> deconstruction
-src/llm.ts           -> direct browser -> provider client
-src/main.ts          -> UI + flow wiring
-.github/workflows/   -> build + test + deploy to Pages
+index.html      entry point: import map, fonts, and all the Spektrum bindings
+app.js          UI state + flow wiring (imports "spektrum" from the CDN)
+engine.js       work-file → category match → narrative → deconstruction
+wikipedia.js    real data-sheet fetch + association extraction
+llm.js          direct browser → provider client + tolerant JSON parse
+data.js         curated subjects (the gate) + conspiracy archetypes
+format.js       small pure text helper
+style.css       broadsheet styling
+spektrum.d.ts   vendored types for editor/jsconfig mapping (authoring only)
+tests/          Node built-in test runner specs (no deps)
 ```
 
-## Develop
+## Develop & test
 
 ```bash
-npm install
-npm run dev        # local dev server
-npm run test       # unit tests (vitest)
-npm run build      # typecheck + production build
+npm test          # runs the unit tests with Node's built-in runner (zero deps)
+npm start         # serves the folder at http://localhost:8088 (python3 http.server)
+# ...or any static server, e.g.  npx serve .
 ```
 
-## Deploy
+## Deploy (static, from a branch)
 
-Pushing to `main` (or the active feature branch) triggers the GitHub Actions workflow, which runs
-the tests, builds with the correct Pages base path, and deploys. In the repo settings set
-**Settings → Pages → Source: GitHub Actions** (one-time). The site lands at
-`https://<you>.github.io/<repo>/`.
+In the repo: **Settings → Pages → Build and deployment → Source: `Deploy from a branch`**, then pick
+the branch and the `/ (root)` folder. The site is served as-is — the import map fetches Spektrum
+from the CDN at runtime. No workflow required.
 
 ## Bring your own key
 

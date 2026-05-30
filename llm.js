@@ -1,18 +1,27 @@
-import type { Provider } from "./types";
+// Direct browser -> provider client for any OpenAI-compatible
+// /chat/completions endpoint, plus a tolerant JSON extractor. No imports,
+// no DOM — runnable under Node's test runner.
 
 /**
- * Direct browser -> provider chat call against any OpenAI-compatible
- * `/chat/completions` endpoint. The key is sent only to the provider the user
- * configured; it never touches a server we control.
+ * @typedef {Object} Provider
+ * @property {string} baseUrl
+ * @property {string} model
+ * @property {string} apiKey
  */
-export async function chat(
-  provider: Provider,
-  system: string,
-  user: string,
-): Promise<string> {
-  let res: Response;
+
+/**
+ * Chat against an OpenAI-compatible endpoint. The key is sent only to the
+ * provider the user configured; it never touches a server we control.
+ * @param {Provider} provider
+ * @param {string} system
+ * @param {string} user
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<string>}
+ */
+export async function chat(provider, system, user, fetchFn = fetch) {
+  let res;
   try {
-    res = await fetch(`${provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    res = await fetchFn(`${provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -28,9 +37,7 @@ export async function chat(
       }),
     });
   } catch {
-    throw new Error(
-      "Network error reaching the provider. Check the base URL and your connection.",
-    );
+    throw new Error("Network error reaching the provider. Check the base URL and your connection.");
   }
 
   if (res.status === 401 || res.status === 403) {
@@ -52,45 +59,37 @@ export async function chat(
   return content;
 }
 
-/** A chat function shape, so engine functions can be tested without a network. */
-export type ChatFn = (
-  provider: Provider,
-  system: string,
-  user: string,
-) => Promise<string>;
-
 /**
  * Parse JSON out of an LLM response that may be wrapped in prose or ```fences```.
- * Returns the parsed value, or `null` if nothing parseable is found.
+ * @template T
+ * @param {string} raw
+ * @returns {T|null}
  */
-export function parseJson<T>(raw: string): T | null {
+export function parseJson(raw) {
   if (typeof raw !== "string") return null;
 
-  // 1. Strip a fenced code block if present (```json ... ``` or ``` ... ```).
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = (fenced ? fenced[1] : raw).trim();
 
-  // 2. Try a direct parse first.
-  const direct = tryParse<T>(candidate);
+  const direct = tryParse(candidate);
   if (direct !== null) return direct;
 
-  // 3. Fall back to the first balanced { ... } or [ ... ] span.
   const span = firstJsonSpan(candidate);
-  if (span) return tryParse<T>(span);
+  if (span) return tryParse(span);
 
   return null;
 }
 
-function tryParse<T>(text: string): T | null {
+function tryParse(text) {
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text);
   } catch {
     return null;
   }
 }
 
 /** Find the first balanced JSON object/array span, respecting strings/escapes. */
-function firstJsonSpan(text: string): string | null {
+function firstJsonSpan(text) {
   const start = text.search(/[{[]/);
   if (start === -1) return null;
 

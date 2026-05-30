@@ -1,0 +1,432 @@
+/**
+ * Spektrum — tiny reactive engine with declarative HTML bindings,
+ * fan-out, and time-travel replay.
+ */
+
+export type State = Record<string, any>;
+
+export interface HistoryEntry {
+  id: string;
+  path: string;
+  value: any;
+  op: 'add' | 'set' | 'checkpoint';
+}
+
+/** A checkpoint entry as surfaced by `Spektrum.checkpoints` —
+ *  a `HistoryEntry` augmented with its position in `history`. */
+export interface CheckpointView extends HistoryEntry {
+  op: 'checkpoint';
+  /** Index in `history` where this checkpoint sits. */
+  index: number;
+}
+
+export interface Snapshot {
+  /** History index after which this snapshot was captured. */
+  index: number;
+  /** Frozen copy of `appState` at that point. */
+  state: State;
+}
+
+export interface ForkRecord {
+  /** The dropped tail of history entries, in original order. */
+  entries: HistoryEntry[];
+  /** Cursor position the fork branched from. */
+  forkedAt: number;
+  /** Wall-clock timestamp (ms) when the fork was captured. */
+  ts: number;
+}
+
+export type SystemFn = (state: State, delta: State) => void;
+
+/**
+ * Closed enum of engine-attached error codes. User-thrown errors
+ * from system functions pass through unchanged (no `code`). Engine-
+ * originated errors carry one of these:
+ *
+ *  - `E_TICK_OVERFLOW`: tick fan-out exceeded 1024 iterations and
+ *    the delta was discarded. Indicates a runaway feedback cycle
+ *    between systems.
+ */
+export type EngineErrorCode = 'E_TICK_OVERFLOW';
+
+/**
+ * Errors received by `onError`. Engine-originated errors carry a
+ * `code` discriminator; system-thrown errors are passed through
+ * with their original identity (no `code`).
+ */
+export type ErrorHandler = (
+  err: Error & { code?: EngineErrorCode },
+  system: SystemFn | null,
+) => void;
+
+export type RecordHandler = (entry: HistoryEntry) => void;
+
+export type ForkHandler = (fork: ForkRecord) => void;
+
+/**
+ * Optional metadata attached to a `defineFn` registration. Surfaced
+ * via `describe()` and the MCP tool catalog so agents see what each
+ * fn does and what arguments it expects without reading the source.
+ */
+export interface FnMeta {
+  /** Human-readable description of what the fn does. */
+  description?: string;
+  /** Free-form input schema (typically JSON Schema). */
+  input?: any;
+  /** Free-form output schema (typically JSON Schema). */
+  output?: any;
+  /** Optional usage examples. */
+  examples?: any[];
+}
+
+/**
+ * The manifest returned by `describe()`. Designed for agent
+ * orientation: one call returns everything an agent needs to start
+ * reasoning about the running instance.
+ */
+export interface SpektrumManifest {
+  state: State;
+  cursor: number;
+  historyLength: number;
+  forkCount: number;
+  snapshotCount: number;
+  options: SpektrumOptions;
+  systems: Array<{ paths: string[]; name: string }>;
+  fns: Array<{ name: string } & FnMeta>;
+  refs: string[];
+  /** intent name → number of bound elements carrying that intent */
+  intents: Record<string, number>;
+  checkpoints: CheckpointView[];
+}
+
+/** A history entry annotated with the systems whose subscriptions
+ *  intersect its path (i.e. who would have fired). */
+export interface ExplainedEntry extends HistoryEntry {
+  index: number;
+  triggers: string[];
+}
+
+/** Handle returned by `attempt()`. The caller decides whether the
+ *  speculative work survives (commit) or is rolled back (discard). */
+export interface AttemptHandle<T = any> {
+  /** Whatever the attempt callback returned (often a Promise). */
+  result: T;
+  /** Mark the attempt as committed in history (records a checkpoint). */
+  commit(): void;
+  /** Replay back to before the attempt; the entries land on `forks` on the next mutation. */
+  discard(): void;
+}
+
+/**
+ * Per-iteration scope passed to handlers triggered inside a `data-each`.
+ * Carries the loop variable (named by `data-as`, defaulting to `item`),
+ * `index` / `$index` / `$first` / `$last` / `$path`, and any outer
+ * scope variables from a parent `data-each`. Pass it to `setValue`-style
+ * helpers via the engine's resolvers, or read it directly for custom
+ * routing decisions.
+ */
+export type IterationScope = Record<string, any>;
+
+export type BoundFn = (
+  el: HTMLElement,
+  state: State,
+  delta: State,
+  value: any,
+  /**
+   * The DOM event that triggered the handler, when applicable.
+   * Available for `data-action="event[.modifier]*"` bindings;
+   * `undefined` for `data-action="cycle"` (subscription-driven, no event).
+   */
+  event?: Event,
+  /**
+   * The per-iteration scope, when the handler fires from inside a
+   * `data-each`. Built-in handlers (`trigger`, `setValue`, `setText`,
+   * `setStyle`) use this to resolve `data-id="row.count"` to the row's
+   * actual state path. `undefined` outside a `data-each`.
+   */
+  scope?: IterationScope
+) => void;
+
+export interface SpektrumOptions {
+  /**
+   * Cap `history.length`. When exceeded, oldest entries are dropped
+   * (FIFO). With a limit set, replay() to indices below the surviving
+   * window is undefined — don't set this if you need unlimited
+   * scrubback.
+   */
+  historyLimit?: number;
+  /**
+   * Capture an `appState` snapshot every K recorded entries so
+   * replay() costs O(K) instead of O(n). Snapshots are dropped
+   * alongside the entries they cover when `historyLimit` trims.
+   */
+  snapshotEvery?: number;
+  /**
+   * Cap the number of preserved fork tails on `forks`. Defaults
+   * to 50; oldest are evicted on overflow. Set `Infinity` to
+   * disable trimming. Set `0` to discard forks immediately (the
+   * `onFork` hook still fires, but `forks` stays empty).
+   */
+  forkLimit?: number;
+}
+
+export interface Spektrum {
+  /** Committed state. Direct mutation persists; setValue/trigger go through the delta. */
+  readonly appState: State;
+  /** Pending writes for the next tick. Cleared at the start of each pass. */
+  readonly appStateDelta: State;
+  /** Append-only log of recorded mutations. */
+  readonly history: HistoryEntry[];
+  /** Replay-acceleration snapshots. Populated only when `snapshotEvery` is set. */
+  readonly snapshots: Snapshot[];
+  /**
+   * Tails of history dropped by mutate-while-scrubbed-back, oldest
+   * first. Each entry is a plain `HistoryEntry[]` plus the cursor
+   * it forked from and a timestamp; restore by re-applying via
+   * `setValue` / `trigger`. Capped by `forkLimit`.
+   */
+  readonly forks: ForkRecord[];
+  /** DOM handles registered via `data-ref="name"`. Keyed by the ref name. */
+  readonly refs: Record<string, Element>;
+  /**
+   * Semantic element registry populated from `data-intent="verb.noun"`.
+   * Each intent maps to the array of elements currently carrying it.
+   * Used by `findByIntent()` and surfaced in `describe()`. Lets agents
+   * locate UI by purpose ("checkout.submit") instead of by selector.
+   */
+  readonly intents: Record<string, Element[]>;
+  /** Index of the next history slot. Equals history.length unless scrubbed back via replay. */
+  readonly cursor: number;
+  /** True while replay() is in flight. */
+  readonly replaying: boolean;
+  /**
+   * Filtered view of `history`: every checkpoint entry with its
+   * history index appended. Allocates on read; for hot paths walk
+   * `history` directly and filter inline.
+   */
+  readonly checkpoints: CheckpointView[];
+
+  /**
+   * Record an absolute set. `id` defaults to `set:${path}` so the
+   * entry stays locatable in `history` and `explain()`. Pairs with
+   * `addValue` (same argument order) so authors can swap one for the
+   * other without re-ordering.
+   */
+  setValue(path: string, value: any, id?: string): void;
+  /**
+   * Record an additive numeric change. Multiple `addValue`s on the
+   * same path within one tick accumulate against the prior value.
+   * `id` defaults to `add:${path}`.
+   */
+  addValue(path: string, value: number, id?: string): void;
+  /**
+   * @deprecated Use {@link Spektrum.addValue} — same semantics with
+   * a `(path, value, id?)` argument order that matches `setValue`.
+   * `trigger` (id-first) is the pre-1.0 spelling, kept as a thin alias
+   * for back-compat.
+   */
+  trigger(id: string, path: string, value: number): void;
+  /**
+   * Record a tagged checkpoint into history. Pure marker — replay
+   * walks past it without state effect. Use to mark logically atomic
+   * boundaries (search complete, form submitted, wizard step done).
+   * Fires `onRecord`. Replay-to-checkpoint:
+   *   spektrum.replay(spektrum.checkpoints.find(c => c.id === name).index + 1)
+   */
+  checkpoint(name: string, metadata?: any): void;
+  /**
+   * First-class derived value. Primes synchronously from current state
+   * on registration (so registering after deps are populated still
+   * lands the initial value), then re-computes when any `deps` path
+   * changes. Writes to both state and delta so mid-tick reads see
+   * fresh values.
+   */
+  computed(path: string, deps: string[], fn: (state: State) => any): () => void;
+  /**
+   * Async resource. Sets `${path}.loading` / `${path}.error` /
+   * `${path}.data` as the promise progresses. Each phase records
+   * through setValue (so the round-trip lands in history; replay
+   * re-applies the values without re-issuing the fetch). Returns the
+   * run function for refetching; also indexed by `path` so
+   * `refresh(path)` works without retaining the handle.
+   */
+  addAsync<T = any>(path: string, fn: () => Promise<T>): () => Promise<void>;
+  /**
+   * Re-run the loader previously registered via `addAsync(path, …)`.
+   * Returns the run Promise, or undefined when `path` was never
+   * registered. Lets callers refetch without retaining the handle.
+   */
+  refresh(path: string): Promise<void> | undefined;
+
+  /** Subscribe a system to one or more paths. Returns an unsubscribe function. */
+  addSystem(paths: string[], fn: SystemFn): () => void;
+  /** Conventional alias for `addSystem`. Same signature. */
+  watch(deps: string[], fn: SystemFn): () => void;
+  /** Detach the first system registered with `fn`. Returns true if removed. */
+  removeSystem(fn: SystemFn): boolean;
+  /**
+   * Register a named handler callable from `data-fn` attributes.
+   * Optional `meta` declares the handler's purpose, input, and output
+   * shape — surfaced via `describe()` so agents know what each verb
+   * does without reading the source.
+   */
+  defineFn(name: string, fn: BoundFn, meta?: FnMeta): void;
+  /**
+   * Subscribe an error handler. Called as `(err, systemFn)` whenever a
+   * subscribed system throws inside tick(). Multiple handlers may be
+   * registered; each call appends a subscriber and returns an
+   * unsubscribe handle. Without any handler, errors fall through to
+   * console.error. Pass `null` to clear every subscriber on this hook.
+   */
+  onError(fn: ErrorHandler): () => void;
+  onError(fn: null): void;
+  /**
+   * Subscribe a post-record hook. Called synchronously with every
+   * recorded `HistoryEntry` after it's been applied, snapshotted, and
+   * trimmed. Does not fire during `replay()` (replay re-applies without
+   * re-recording). Multiple handlers may be registered; returns an
+   * unsubscribe handle. Pass `null` to clear all subscribers.
+   */
+  onRecord(fn: RecordHandler): () => void;
+  onRecord(fn: null): void;
+  /**
+   * Subscribe a fork hook. Fires when a `record()` truncates history
+   * (mutate-while-scrubbed-back), receiving the captured `ForkRecord`.
+   * Descriptive: the truncate has already happened by the time the hook
+   * runs; the dropped entries are accessible on `forks` and via the
+   * hook argument. Multiple handlers may be registered; returns an
+   * unsubscribe handle. Pass `null` to clear all subscribers.
+   */
+  onFork(fn: ForkHandler): () => void;
+  onFork(fn: null): void;
+
+  /**
+   * Scan a DOM subtree for declarative bindings: {{expr}}, :attr="expr",
+   * data-if, data-each, data-key, data-model, data-ref, and data-action.
+   * Returns a destroy function that undoes every binding it set up.
+   */
+  bindDOM(root?: Element | Document): () => void;
+  /** rAF-driven tick pump. Reschedules itself every animation frame. */
+  run(): void;
+  /** Run one simulation step, draining the delta to quiescence. */
+  tick(): void;
+
+  /** Reset state and re-apply the first `n` recorded entries. O(K) when snapshotEvery is set. */
+  replay(n: number): void;
+  /**
+   * Wipe runtime state, refs, history, snapshots, forks. **Preserves**
+   * registered systems, defineFn entries, and hooks (onError, onRecord,
+   * onFork). Use this from library code that wants to clear state
+   * without nuking the host app's subscriptions.
+   */
+  resetState(): void;
+  /**
+   * Same as `resetState()`, but also clears systems registered via
+   * `addSystem`. Built-in fns and hook registrations survive. Warns
+   * when active systems are present at call time — silent detachment
+   * has bitten users; call `resetState()` instead when you only want
+   * to wipe state.
+   */
+  reset(): void;
+
+  /**
+   * Serialize a portable snapshot of the instance. By default
+   * includes `state`, `history`, and `cursor` so a fresh instance
+   * can `loadHistory` it back to the same point. Pass
+   * `{ includeHistory: false }` for a state-only snapshot;
+   * `{ includeForks: true }` to also include preserved fork tails
+   * (debug-only; forks aren't replay-restored by `loadHistory`).
+   */
+  serialize(opts?: { includeHistory?: boolean; includeForks?: boolean }): string;
+
+  // === Agent surface ===
+
+  /**
+   * Operational manifest of the running instance. One JSON object
+   * containing state, registered systems, fns and their schemas,
+   * named refs, registered intents, checkpoints, and history shape.
+   * Cheap. The single best first call for an agent orienting itself.
+   */
+  describe(): SpektrumManifest;
+
+  /**
+   * Causal trace over a slice of `history`. Each entry is annotated
+   * with the systems whose subscriptions intersect its path. Useful
+   * for agents reconstructing why state moved. Note: subscriber set
+   * is the CURRENT registry, not a historical record of who actually
+   * fired.
+   */
+  explain(opts?: { from?: number; to?: number }): ExplainedEntry[];
+
+  /**
+   * Speculative execution. Drops a checkpoint, runs `fn`, returns a
+   * handle the caller uses to commit (mark in history) or discard
+   * (rewind cursor). `fn` may return a value or a Promise — the
+   * caller awaits and decides.
+   */
+  attempt<T = any>(name: string, fn: () => T): AttemptHandle<T>;
+
+  /**
+   * Locate elements by their declared `data-intent`. Returns a copy
+   * so the caller can iterate without racing the registry.
+   */
+  findByIntent(name: string): Element[];
+}
+
+/** Walk a dotted path into `obj` and return the leaf value, or undefined. */
+export function getPathObj<T = any>(obj: object, path: string): T | undefined;
+
+/** Walk `path` (creating missing parents) and assign `value` at the leaf. */
+export function setPathValue(obj: object, path: string, value: any): void;
+
+/**
+ * Register a precompiled expression function. Build-time tooling
+ * (see `spektrum-compile.js`) emits one call per unique template
+ * expression, letting Spektrum run under strict CSP — the runtime
+ * never reaches the `new Function` fallback when the cache hits.
+ */
+export function precompile(source: string, fn: (state: State) => any): void;
+
+/** Create an isolated Spektrum instance. */
+export function createSpektrum(opts?: SpektrumOptions): Spektrum;
+
+declare const _default: Spektrum;
+export default _default;
+
+// Named exports of the default singleton's methods/state. Live bindings
+// for `appState`, `appStateDelta`, `history`, `snapshots`, and `refs`
+// (same object refs as the singleton's). For `cursor` and `replaying`
+// use the default import or `createSpektrum()` and read the property.
+export const appState: State;
+export const appStateDelta: State;
+export const history: HistoryEntry[];
+export const snapshots: Snapshot[];
+export const forks: ForkRecord[];
+export const refs: Record<string, Element>;
+export const intents: Record<string, Element[]>;
+export const setValue: Spektrum['setValue'];
+export const addValue: Spektrum['addValue'];
+/** @deprecated Use {@link addValue}. See `Spektrum['trigger']`. */
+export const trigger: Spektrum['trigger'];
+export const checkpoint: Spektrum['checkpoint'];
+export const computed: Spektrum['computed'];
+export const addAsync: Spektrum['addAsync'];
+export const refresh: Spektrum['refresh'];
+export const addSystem: Spektrum['addSystem'];
+export const watch: Spektrum['watch'];
+export const removeSystem: Spektrum['removeSystem'];
+export const defineFn: Spektrum['defineFn'];
+export const onError: Spektrum['onError'];
+export const onRecord: Spektrum['onRecord'];
+export const onFork: Spektrum['onFork'];
+export const bindDOM: Spektrum['bindDOM'];
+export const run: Spektrum['run'];
+export const tick: Spektrum['tick'];
+export const replay: Spektrum['replay'];
+export const reset: Spektrum['reset'];
+export const resetState: Spektrum['resetState'];
+export const serialize: Spektrum['serialize'];
+export const describe: Spektrum['describe'];
+export const explain: Spektrum['explain'];
+export const attempt: Spektrum['attempt'];
+export const findByIntent: Spektrum['findByIntent'];

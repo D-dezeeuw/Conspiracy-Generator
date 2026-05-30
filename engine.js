@@ -1,26 +1,35 @@
-import categoriesData from "../data/categories.json";
-import type {
-  Category,
-  CategoryMatch,
-  Correlation,
-  DataSheet,
-  Deconstruction,
-  Narrative,
-  Provider,
-  Subject,
-  WorkFile,
-} from "./types";
-import { chat, parseJson, type ChatFn } from "./llm";
-import { fetchDataSheet } from "./wikipedia";
+// Work-file assembly, category match, narrative generation, and the
+// deconstruction reveal. Pure functions with an injectable chat fn, so the
+// whole pipeline tests under Node with fakes — no network, no DOM, no deps.
 
-export const categories = categoriesData as Category[];
+import { chat, parseJson } from "./llm.js";
+import { fetchDataSheet } from "./wikipedia.js";
 
-export function getCategory(id: string): Category | undefined {
+/**
+ * @typedef {import("./data.js").Category} Category
+ * @typedef {import("./data.js").Subject} Subject
+ * @typedef {import("./wikipedia.js").DataSheet} DataSheet
+ * @typedef {import("./llm.js").Provider} Provider
+ * @typedef {{ fact: string, source: string, url: string }} Correlation
+ * @typedef {{ categoryId: string, reasoning: string }} CategoryMatch
+ * @typedef {{ subject: Subject, dataSheet: DataSheet, correlations: Correlation[], match?: CategoryMatch }} WorkFile
+ * @typedef {{ text: string, basedOn: string }} Claim
+ * @typedef {{ headline: string, subhead: string, body: string, claims: Claim[] }} Narrative
+ * @typedef {{ move: string, fallacy: string }} DeconstructionMove
+ * @typedef {{ summary: string, moves: DeconstructionMove[] }} Deconstruction
+ */
+
+/** @param {Category[]} categories @param {string} id */
+export function getCategory(categories, id) {
   return categories.find((c) => c.id === id);
 }
 
-/** Turn a real data sheet's associations into sourced correlations. */
-export function buildCorrelations(dataSheet: DataSheet): Correlation[] {
+/**
+ * Turn a real data sheet's associations into sourced correlations.
+ * @param {DataSheet} dataSheet
+ * @returns {Correlation[]}
+ */
+export function buildCorrelations(dataSheet) {
   return dataSheet.associations.map((assoc) => ({
     fact: `${dataSheet.name} is documented in connection with ${assoc}.`,
     source: "Wikipedia",
@@ -28,20 +37,21 @@ export function buildCorrelations(dataSheet: DataSheet): Correlation[] {
   }));
 }
 
-/** Assemble the full work-file from real, sourced material only. */
-export async function buildWorkFile(
-  subject: Subject,
-  fetchFn: typeof fetch = fetch,
-): Promise<WorkFile> {
+/**
+ * Assemble the full work-file from real, sourced material only.
+ * @param {Subject} subject
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<WorkFile>}
+ */
+export async function buildWorkFile(subject, fetchFn = fetch) {
   const dataSheet = await fetchDataSheet(subject, fetchFn);
   return { subject, dataSheet, correlations: buildCorrelations(dataSheet) };
 }
 
-// ---------------------------------------------------------------------------
-// Category match
-// ---------------------------------------------------------------------------
+// --- Category match --------------------------------------------------------
 
-export function buildMatchPrompt(workFile: WorkFile): { system: string; user: string } {
+/** @param {WorkFile} workFile @param {Category[]} categories */
+export function buildMatchPrompt(workFile, categories) {
   const system = [
     "You are a pattern-matcher for a media-literacy demonstration.",
     "Given real facts about a long-deceased historical figure and a list of conspiracy",
@@ -50,13 +60,11 @@ export function buildMatchPrompt(workFile: WorkFile): { system: string; user: st
   ].join("\n");
 
   const catalogue = categories
-    .map(
-      (c) =>
-        `- id: ${c.id}\n  name: ${c.name}\n  patterns: ${c.correlation_patterns.join("; ")}`,
-    )
+    .map((c) => `- id: ${c.id}\n  name: ${c.name}\n  patterns: ${c.correlation_patterns.join("; ")}`)
     .join("\n");
 
-  const facts = workFile.correlations.map((c) => `- ${c.fact}`).join("\n") || "- (no notable associations found)";
+  const facts = workFile.correlations.map((c) => `- ${c.fact}`).join("\n") ||
+    "- (no notable associations found)";
 
   const user = [
     `Subject: ${workFile.subject.name}`,
@@ -69,38 +77,35 @@ export function buildMatchPrompt(workFile: WorkFile): { system: string; user: st
   return { system, user };
 }
 
-/** Ask the LLM for the best category; always returns a valid, known category id. */
-export async function matchCategory(
-  provider: Provider,
-  workFile: WorkFile,
-  chatFn: ChatFn = chat,
-): Promise<CategoryMatch> {
-  const { system, user } = buildMatchPrompt(workFile);
+/**
+ * Ask the LLM for the best category; always returns a valid, known id.
+ * @param {Provider} provider
+ * @param {WorkFile} workFile
+ * @param {Category[]} categories
+ * @param {typeof chat} [chatFn]
+ * @returns {Promise<CategoryMatch>}
+ */
+export async function matchCategory(provider, workFile, categories, chatFn = chat) {
+  const { system, user } = buildMatchPrompt(workFile, categories);
   const raw = await chatFn(provider, system, user);
-  const parsed = parseJson<Partial<CategoryMatch>>(raw);
+  const parsed = parseJson(raw);
 
-  const valid = parsed?.categoryId && getCategory(parsed.categoryId);
-  if (valid) {
+  if (parsed?.categoryId && getCategory(categories, parsed.categoryId)) {
     return {
-      categoryId: parsed!.categoryId!,
-      reasoning: parsed?.reasoning || "Best structural fit for the available facts.",
+      categoryId: parsed.categoryId,
+      reasoning: parsed.reasoning || "Best structural fit for the available facts.",
     };
   }
-  // Safe fallback to the first category if the model misbehaves.
   return {
     categoryId: categories[0].id,
     reasoning: "Defaulted to the first archetype (model did not return a valid match).",
   };
 }
 
-// ---------------------------------------------------------------------------
-// Narrative generation
-// ---------------------------------------------------------------------------
+// --- Narrative generation --------------------------------------------------
 
-export function buildNarrativePrompt(
-  workFile: WorkFile,
-  category: Category,
-): { system: string; user: string } {
+/** @param {WorkFile} workFile @param {Category} category */
+export function buildNarrativePrompt(workFile, category) {
   const system = [
     "You write a single sensationalized news-style article that frames real, sourced facts",
     "as if they prove a hidden causal conspiracy. This is a media-literacy exercise.",
@@ -127,15 +132,17 @@ export function buildNarrativePrompt(
   return { system, user };
 }
 
-export async function generateNarrative(
-  provider: Provider,
-  workFile: WorkFile,
-  category: Category,
-  chatFn: ChatFn = chat,
-): Promise<Narrative> {
+/**
+ * @param {Provider} provider
+ * @param {WorkFile} workFile
+ * @param {Category} category
+ * @param {typeof chat} [chatFn]
+ * @returns {Promise<Narrative>}
+ */
+export async function generateNarrative(provider, workFile, category, chatFn = chat) {
   const { system, user } = buildNarrativePrompt(workFile, category);
   const raw = await chatFn(provider, system, user);
-  const parsed = parseJson<Partial<Narrative>>(raw);
+  const parsed = parseJson(raw);
   if (!parsed || typeof parsed.body !== "string") {
     throw new Error("The model did not return a usable article. Try regenerating.");
   }
@@ -144,22 +151,15 @@ export async function generateNarrative(
     subhead: parsed.subhead || "",
     body: parsed.body,
     claims: Array.isArray(parsed.claims)
-      ? parsed.claims.filter(
-          (c): c is { text: string; basedOn: string } =>
-            !!c && typeof c.text === "string" && typeof c.basedOn === "string",
-        )
+      ? parsed.claims.filter((c) => c && typeof c.text === "string" && typeof c.basedOn === "string")
       : [],
   };
 }
 
-// ---------------------------------------------------------------------------
-// Deconstruction (the reveal)
-// ---------------------------------------------------------------------------
+// --- Deconstruction (the reveal) -------------------------------------------
 
-export function buildDeconstructionPrompt(
-  narrative: Narrative,
-  workFile: WorkFile,
-): { system: string; user: string } {
+/** @param {Narrative} narrative @param {WorkFile} workFile */
+export function buildDeconstructionPrompt(narrative, workFile) {
   const system = [
     "You are a media-literacy analyst. Given a conspiracy-style article and the real facts",
     "behind it, explain how it manufactured the impression of causation from mere correlation.",
@@ -179,25 +179,24 @@ export function buildDeconstructionPrompt(
   return { system, user };
 }
 
-export async function deconstruct(
-  provider: Provider,
-  narrative: Narrative,
-  workFile: WorkFile,
-  chatFn: ChatFn = chat,
-): Promise<Deconstruction> {
+/**
+ * @param {Provider} provider
+ * @param {Narrative} narrative
+ * @param {WorkFile} workFile
+ * @param {typeof chat} [chatFn]
+ * @returns {Promise<Deconstruction>}
+ */
+export async function deconstruct(provider, narrative, workFile, chatFn = chat) {
   const { system, user } = buildDeconstructionPrompt(narrative, workFile);
   const raw = await chatFn(provider, system, user);
-  const parsed = parseJson<Partial<Deconstruction>>(raw);
+  const parsed = parseJson(raw);
   if (!parsed) {
     throw new Error("The model did not return a usable deconstruction. Try again.");
   }
   return {
     summary: parsed.summary || "This article arranges true facts to imply a causation that the facts do not support.",
     moves: Array.isArray(parsed.moves)
-      ? parsed.moves.filter(
-          (m): m is { move: string; fallacy: string } =>
-            !!m && typeof m.move === "string" && typeof m.fallacy === "string",
-        )
+      ? parsed.moves.filter((m) => m && typeof m.move === "string" && typeof m.fallacy === "string")
       : [],
   };
 }
