@@ -66,11 +66,27 @@ engine.js       work-file → category match → narrative → deconstruction (l
 wikipedia.js    real source gathering: data sheet + related pages + Wikinews
 llm.js          direct browser → provider client + tolerant JSON parse
 data.js         curated subjects (the gate) + patterns + angles + report languages
+params.js       resolve URL prefill params (?target/angle/pattern/lang) → selections
 format.js       small pure text helper
 style.css       broadsheet styling
 spektrum.d.ts   vendored types for editor/jsconfig mapping (authoring only)
 tests/          Node built-in test runner specs (no deps)
 ```
+
+## Prefill via URL
+
+You can deep-link a starting selection with query params — handy for sharing a specific setup:
+
+```
+?target=nicola+tesla&angle=religious/occult&pattern=the+stolen+legacy&lang=Dutch
+```
+
+Values are matched **fuzzily** by id or display name (case-insensitive, punctuation-tolerant, and
+forgiving of light misspellings — `nicola` still finds `Nikola Tesla`). `pattern` and `category` are
+interchangeable, as are `lang` and `language`. Anything that doesn't resolve falls through to the
+default. **A `target` that doesn't match a curated figure is ignored** — the URL is not a free-text
+back door around the safety gate. A URL-pinned angle/pattern is respected and not overwritten by the
+engine's recommendation.
 
 ## Develop & test
 

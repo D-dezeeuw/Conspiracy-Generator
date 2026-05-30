@@ -7,6 +7,7 @@ import { setValue, computed, addSystem, defineFn, bindDOM, run } from "spektrum"
 import { SUBJECTS, CATEGORIES, ANGLES, LANGUAGES } from "./data.js";
 import { buildWorkFile, matchCategory, generateNarrative, deconstruct, getCategory, getAngle, SECTIONS } from "./engine.js";
 import { toParagraphs } from "./format.js";
+import { resolveParams } from "./params.js";
 
 const DEFAULTS = { baseUrl: "https://openrouter.ai/api/v1", model: "tencent/hy3-preview" };
 
@@ -41,13 +42,23 @@ fillSelect("angle", ANGLES, (a) => a.name);
 fillSelect("category", CATEGORIES, (c) => c.name);
 fillSelect("language", LANGUAGES, (l) => l.name);
 
-setValue("subjectId", SUBJECTS[0].id);
-setValue("angleId", ANGLES[0].id);     // "auto" — overwritten with the recommendation after run
-setValue("categoryId", CATEGORIES[0].id); // overwritten with the best match after run
-setValue("langId", storedLang);
+// Optional URL prefills, e.g. ?target=nicola+tesla&angle=religious/occult&pattern=the+stolen+legacy.
+// Unresolved values fall through to the defaults; an unresolved `target` is
+// ignored, preserving the curated-subject safety gate.
+const prefill = resolveParams(typeof location !== "undefined" ? location.search : "", { SUBJECTS, ANGLES, CATEGORIES, LANGUAGES });
+
+setValue("subjectId", prefill.subjectId || SUBJECTS[0].id);
+setValue("angleId", prefill.angleId || ANGLES[0].id);     // "auto" — overwritten with the recommendation after run, unless the URL pinned one
+setValue("categoryId", prefill.categoryId || CATEGORIES[0].id); // overwritten with the best match after run, unless the URL pinned one
+setValue("langId", prefill.langId || storedLang);
 setValue("baseUrl", storedBase);
 setValue("model", storedModel);
 setValue("apiKey", ""); // memory only — never persisted
+
+// If the URL pinned an angle/pattern, treat those as user-locked so the
+// post-gather recommendation does not silently overwrite them.
+const lockedAngle = !!prefill.angleId;
+const lockedPattern = !!prefill.categoryId;
 
 setValue("status", "Pick a subject and run the engine.");
 setValue("busy", false);
@@ -163,14 +174,15 @@ defineFn(
       setValue("sourceUrl", workFile.dataSheet.url);
       setValue("hasMatch", true);
 
-      // Recommend both axes, but let the user decide before continuing.
+      // Recommend both axes, but let the user decide before continuing. A
+      // URL-pinned angle/pattern stays put — the recommendation never clobbers it.
       setValue("matchName", recommended.name);
       setValue("matchAngleName", recommendedAngle.name);
       setValue("matchReason", workFile.match.reasoning);
       setValue("recommendedId", recommended.id);
       setValue("recommendedAngleId", recommendedAngle.id);
-      setValue("categoryId", recommended.id);   // preselect the pattern dropdown
-      setValue("angleId", recommendedAngle.id);  // preselect the angle dropdown
+      if (!lockedPattern) setValue("categoryId", recommended.id);   // preselect the pattern dropdown
+      if (!lockedAngle) setValue("angleId", recommendedAngle.id);   // preselect the angle dropdown
       setValue("hasCategoryChoice", true);
 
       setValue("status", "Review the recommended angle + pattern, adjust if you like, then continue.");
