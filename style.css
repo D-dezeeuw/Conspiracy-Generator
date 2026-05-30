@@ -108,7 +108,15 @@ button.primary:not(:disabled):hover { background: var(--accent); }
 }
 .pull cite { display: block; margin-top: 0.3rem; font-style: normal; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-soft); }
 .pull .spin { display: block; margin-top: 0.5rem; font-style: normal; font-family: var(--mono); font-size: 0.72rem; line-height: 1.5; color: var(--accent); }
-@media (max-width: 560px) { .pull { float: none; width: auto; margin: 0.5rem 0 1.2rem; } }
+/* Mobile: the side panel drops out of the float and spans the full column. */
+@media (max-width: 560px) {
+  .pull {
+    float: none;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0.5rem 0 1.2rem;
+  }
+}
 
 /* The "it never ended" closer — the report's final passage. */
 .article .closer {
