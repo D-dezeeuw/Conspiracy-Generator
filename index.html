@@ -113,6 +113,11 @@
         </div>
         <p class="rationale">{{selCatDescription}}</p>
         <p class="match-note">Fallacy it illustrates: <em>{{selCatFallacy}}</em></p>
+        <div class="field">
+          <label for="language">Report language</label>
+          <select id="language" data-model="langId"></select>
+          <div class="hint">The article and the reveal are written in this language. Sources stay as published.</div>
+        </div>
         <button class="primary" data-action="click" data-fn="continueEngine" :disabled="busy">
           Continue →
         </button>

@@ -3,7 +3,7 @@
 // whole pipeline tests under Node with fakes — no network, no DOM, no deps.
 
 import { chat, parseJson } from "./llm.js";
-import { fetchDataSheet } from "./wikipedia.js";
+import { gatherSources } from "./wikipedia.js";
 
 /**
  * @typedef {import("./data.js").Category} Category
@@ -25,27 +25,46 @@ export function getCategory(categories, id) {
 }
 
 /**
- * Turn a real data sheet's associations into sourced correlations.
+ * Build sourced correlations from the full real-source pool: the Wikipedia
+ * data-sheet associations, related encyclopedia pages, and Wikinews coverage.
+ * Each correlation keeps a checkable source label + URL. Deduped by fact text.
  * @param {DataSheet} dataSheet
+ * @param {import("./wikipedia.js").SourceItem[]} [related]
+ * @param {import("./wikipedia.js").SourceItem[]} [news]
  * @returns {Correlation[]}
  */
-export function buildCorrelations(dataSheet) {
-  return dataSheet.associations.map((assoc) => ({
-    fact: `${dataSheet.name} is documented in connection with ${assoc}.`,
-    source: "Wikipedia",
-    url: dataSheet.url,
-  }));
+export function buildCorrelations(dataSheet, related = [], news = []) {
+  const out = [];
+  const seen = new Set();
+  const push = (fact, source, url) => {
+    const key = fact.toLowerCase();
+    if (!fact || seen.has(key)) return;
+    seen.add(key);
+    out.push({ fact, source, url });
+  };
+
+  for (const assoc of dataSheet.associations) {
+    push(`${dataSheet.name} is documented in connection with ${assoc}.`, "Wikipedia", dataSheet.url);
+  }
+  for (const r of related) {
+    push(`${dataSheet.name} is encyclopedically linked to ${r.title}.`, r.source, r.url);
+  }
+  for (const n of news) {
+    push(`${dataSheet.name} appears in news coverage titled “${n.title}”.`, n.source, n.url);
+  }
+  return out;
 }
 
 /**
- * Assemble the full work-file from real, sourced material only.
+ * Assemble the full work-file from real, sourced material only, gathered from
+ * several keyless public sources concurrently.
  * @param {Subject} subject
  * @param {typeof fetch} [fetchFn]
  * @returns {Promise<WorkFile>}
  */
 export async function buildWorkFile(subject, fetchFn = fetch) {
-  const dataSheet = await fetchDataSheet(subject, fetchFn);
-  return { subject, dataSheet, correlations: buildCorrelations(dataSheet) };
+  const { dataSheet, related, news } = await gatherSources(subject, fetchFn);
+  return { subject, dataSheet, correlations: buildCorrelations(dataSheet, related, news) };
 }
 
 // --- Category match --------------------------------------------------------
@@ -104,8 +123,8 @@ export async function matchCategory(provider, workFile, categories, chatFn = cha
 
 // --- Narrative generation --------------------------------------------------
 
-/** @param {WorkFile} workFile @param {Category} category */
-export function buildNarrativePrompt(workFile, category) {
+/** @param {WorkFile} workFile @param {Category} category @param {string} [language] */
+export function buildNarrativePrompt(workFile, category, language = "English") {
   const system = [
     "You write a single sensationalized news-style article that frames real, sourced facts",
     "as if they prove a hidden causal conspiracy. This is a media-literacy exercise.",
@@ -114,6 +133,7 @@ export function buildNarrativePrompt(workFile, category) {
     "2. You amplify INTERPRETATION and insinuation, not facts.",
     "3. Every entry in `claims` must reference, in `basedOn`, which provided fact it is built on.",
     "4. The subject is a long-deceased historical figure; treat this purely as a study in rhetoric.",
+    `5. Write ALL output text (headline, subhead, body, and every claim) in ${language}. The JSON keys stay in English; only the values are in ${language}. Proper names may keep their original spelling.`,
     'Respond ONLY with JSON: {"headline": string, "subhead": string, "body": string, "claims": [{"text": string, "basedOn": string}]}.',
   ].join("\n");
 
@@ -136,11 +156,12 @@ export function buildNarrativePrompt(workFile, category) {
  * @param {Provider} provider
  * @param {WorkFile} workFile
  * @param {Category} category
+ * @param {string} [language]
  * @param {typeof chat} [chatFn]
  * @returns {Promise<Narrative>}
  */
-export async function generateNarrative(provider, workFile, category, chatFn = chat) {
-  const { system, user } = buildNarrativePrompt(workFile, category);
+export async function generateNarrative(provider, workFile, category, language = "English", chatFn = chat) {
+  const { system, user } = buildNarrativePrompt(workFile, category, language);
   const raw = await chatFn(provider, system, user);
   const parsed = parseJson(raw);
   if (!parsed || typeof parsed.body !== "string") {
@@ -158,11 +179,12 @@ export async function generateNarrative(provider, workFile, category, chatFn = c
 
 // --- Deconstruction (the reveal) -------------------------------------------
 
-/** @param {Narrative} narrative @param {WorkFile} workFile */
-export function buildDeconstructionPrompt(narrative, workFile) {
+/** @param {Narrative} narrative @param {WorkFile} workFile @param {string} [language] */
+export function buildDeconstructionPrompt(narrative, workFile, language = "English") {
   const system = [
     "You are a media-literacy analyst. Given a conspiracy-style article and the real facts",
     "behind it, explain how it manufactured the impression of causation from mere correlation.",
+    `Write all output text (summary and every move/fallacy) in ${language}. JSON keys stay in English.`,
     'Respond ONLY with JSON: {"summary": string, "moves": [{"move": string, "fallacy": string}]}.',
   ].join("\n");
 
@@ -183,11 +205,12 @@ export function buildDeconstructionPrompt(narrative, workFile) {
  * @param {Provider} provider
  * @param {Narrative} narrative
  * @param {WorkFile} workFile
+ * @param {string} [language]
  * @param {typeof chat} [chatFn]
  * @returns {Promise<Deconstruction>}
  */
-export async function deconstruct(provider, narrative, workFile, chatFn = chat) {
-  const { system, user } = buildDeconstructionPrompt(narrative, workFile);
+export async function deconstruct(provider, narrative, workFile, language = "English", chatFn = chat) {
+  const { system, user } = buildDeconstructionPrompt(narrative, workFile, language);
   const raw = await chatFn(provider, system, user);
   const parsed = parseJson(raw);
   if (!parsed) {

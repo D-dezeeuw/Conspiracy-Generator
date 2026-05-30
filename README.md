@@ -27,23 +27,33 @@ bundler.
 
 1. **Pick a subject** from a curated dropdown of long-deceased figures. There is no free-text name
    entry — the list *is* the safety gate, so the engine can never be pointed at a living person.
-2. The app fetches a **real Wikipedia data sheet** (client-side, public REST API).
-3. It assembles a **work-file** of real, sourced correlations — each links back to its Wikipedia
-   source.
-4. An LLM picks the best-fit **conspiracy pattern** from a hand-authored dataset of archetypes.
+2. The app gathers **real material from several keyless public sources, concurrently**: the
+   Wikipedia REST summary (the bio), Wikipedia **related pages** (adjacent topics), and **Wikinews**
+   coverage. Each source is best-effort — if one is unavailable the run continues on the rest.
+3. It assembles a **work-file** of real, sourced correlations — every one links back to its own
+   checkable source URL (Wikipedia, Wikipedia-related, or Wikinews).
+4. An LLM picks the best-fit **conspiracy pattern** from a hand-authored dataset of archetypes, then
+   pauses so you can confirm or change the pattern **and choose the report language**.
 5. The LLM writes a **sensationalized article** that amplifies the *interpretation* of those facts
-   without inventing any new ones. Every claim is tagged with the real fact it rests on.
-6. A **deconstruction panel** names each persuasive move and the fallacy it illustrates.
+   without inventing any new ones, **in your chosen language**. Every claim is tagged with the real
+   fact it rests on.
+6. A **deconstruction panel** (also in your chosen language) names each persuasive move and the
+   fallacy it illustrates.
+
+> **On the source pool:** the engine only ingests *real, independently published* facts that carry a
+> verifiable URL — it deliberately does **not** scrape conspiracy sites, because injecting fabricated
+> "facts" would break both the safety model and the entire correlation-vs-causation lesson. The pool
+> grows by adding more *trustworthy* sources, not more sensational ones.
 
 ## Files
 
 ```
 index.html      entry point: import map, fonts, and all the Spektrum bindings
 app.js          UI state + flow wiring (imports "spektrum" from the CDN)
-engine.js       work-file → category match → narrative → deconstruction
-wikipedia.js    real data-sheet fetch + association extraction
+engine.js       work-file → category match → narrative → deconstruction (language-aware)
+wikipedia.js    real source gathering: data sheet + related pages + Wikinews
 llm.js          direct browser → provider client + tolerant JSON parse
-data.js         curated subjects (the gate) + conspiracy archetypes
+data.js         curated subjects (the gate) + conspiracy archetypes + report languages
 format.js       small pure text helper
 style.css       broadsheet styling
 spektrum.d.ts   vendored types for editor/jsconfig mapping (authoring only)

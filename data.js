@@ -21,6 +21,28 @@
  * @property {string} fallacy_illustrated
  */
 
+/**
+ * @typedef {Object} Language
+ * @property {string} id    BCP-47-ish short code, used as the option value.
+ * @property {string} name  Display name passed to the model as the target language.
+ */
+
+/** @type {Language[]} */
+export const LANGUAGES = [
+  { id: "en", name: "English" },
+  { id: "nl", name: "Dutch (Nederlands)" },
+  { id: "es", name: "Spanish (Español)" },
+  { id: "fr", name: "French (Français)" },
+  { id: "de", name: "German (Deutsch)" },
+  { id: "it", name: "Italian (Italiano)" },
+  { id: "pt", name: "Portuguese (Português)" },
+  { id: "pl", name: "Polish (Polski)" },
+  { id: "ru", name: "Russian (Русский)" },
+  { id: "tr", name: "Turkish (Türkçe)" },
+  { id: "ja", name: "Japanese (日本語)" },
+  { id: "zh", name: "Chinese (中文)" },
+];
+
 /** @type {Subject[]} */
 export const SUBJECTS = [
   { id: "tesla", name: "Nikola Tesla", wikipedia: "Nikola_Tesla", died: "1943", rationale: "Inventor whose disputed legacy and lonely death made him a magnet for myth." },

@@ -4,7 +4,7 @@
 // the markup in index.html holds every binding.
 
 import { setValue, computed, addSystem, defineFn, bindDOM, run } from "spektrum";
-import { SUBJECTS, CATEGORIES } from "./data.js";
+import { SUBJECTS, CATEGORIES, LANGUAGES } from "./data.js";
 import { buildWorkFile, matchCategory, generateNarrative, deconstruct, getCategory } from "./engine.js";
 import { toParagraphs } from "./format.js";
 
@@ -17,9 +17,11 @@ let currentWorkFile = null;
 // --- Initial state --------------------------------------------------------
 let storedBase = DEFAULTS.baseUrl;
 let storedModel = DEFAULTS.model;
+let storedLang = LANGUAGES[0].id;
 try {
   storedBase = sessionStorage.getItem("ce_baseUrl") || DEFAULTS.baseUrl;
   storedModel = sessionStorage.getItem("ce_model") || DEFAULTS.model;
+  storedLang = sessionStorage.getItem("ce_lang") || LANGUAGES[0].id;
 } catch { /* sessionStorage unavailable; fall back to defaults */ }
 
 // The curated option lists are static, so build them imperatively. (A
@@ -36,9 +38,11 @@ function fillSelect(id, items, label) {
 }
 fillSelect("subject", SUBJECTS, (s) => `${s.name} (d. ${s.died})`);
 fillSelect("category", CATEGORIES, (c) => c.name);
+fillSelect("language", LANGUAGES, (l) => l.name);
 
 setValue("subjectId", SUBJECTS[0].id);
 setValue("categoryId", CATEGORIES[0].id); // overwritten with the best match after run
+setValue("langId", storedLang);
 setValue("baseUrl", storedBase);
 setValue("model", storedModel);
 setValue("apiKey", ""); // memory only — never persisted
@@ -80,13 +84,19 @@ computed("statusClass", ["statusError", "busy"], (s) =>
   "status" + (s.statusError ? " error" : "") + (s.busy ? " spinner" : ""),
 );
 
-// Persist only the non-secret provider settings.
-addSystem(["baseUrl", "model"], (s) => {
+// Persist only the non-secret provider + language settings.
+addSystem(["baseUrl", "model", "langId"], (s) => {
   try {
     sessionStorage.setItem("ce_baseUrl", s.baseUrl ?? "");
     sessionStorage.setItem("ce_model", s.model ?? "");
+    sessionStorage.setItem("ce_lang", s.langId ?? "");
   } catch { /* ignore */ }
 });
+
+/** Resolve the chosen language's display name for the prompts. */
+function languageName(state) {
+  return LANGUAGES.find((l) => l.id === state.langId)?.name || "English";
+}
 
 // --- Helpers --------------------------------------------------------------
 function providerFrom(state) {
@@ -170,6 +180,7 @@ defineFn(
 
     const provider = providerFrom(state);
     const category = getCategory(CATEGORIES, state.categoryId) || CATEGORIES[0];
+    const language = languageName(state);
     currentWorkFile.match = { categoryId: category.id, reasoning: state.matchReason || "" };
 
     setValue("statusError", false);
@@ -177,8 +188,8 @@ defineFn(
     clearGenerated();
 
     try {
-      setValue("status", `Generating the (deliberately fallacious) article as “${category.name}”…`);
-      const narrative = await generateNarrative(provider, currentWorkFile, category);
+      setValue("status", `Generating the (deliberately fallacious) article as “${category.name}” in ${language}…`);
+      const narrative = await generateNarrative(provider, currentWorkFile, category, language);
       setValue("articleHeadline", narrative.headline);
       setValue("articleSubhead", narrative.subhead);
       setValue("bodyParas", toParagraphs(narrative.body));
@@ -186,7 +197,7 @@ defineFn(
       setValue("hasArticle", true);
 
       setValue("status", "Deconstructing the trick…");
-      const reveal = await deconstruct(provider, narrative, currentWorkFile);
+      const reveal = await deconstruct(provider, narrative, currentWorkFile, language);
       setValue("revealSummary", reveal.summary);
       setValue("moves", reveal.moves);
       setValue("hasReveal", true);

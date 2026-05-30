@@ -33,6 +33,28 @@ test("buildCorrelations makes one sourced correlation per association", () => {
   });
 });
 
+test("buildCorrelations merges related pages and news, each with its own source/url", () => {
+  const related = [{ title: "War of the currents", summary: "", url: "https://en.wikipedia.org/wiki/War_of_the_currents", source: "Wikipedia (related)" }];
+  const news = [{ title: "Tesla coil demonstrated", summary: "", url: "https://en.wikinews.org/wiki/Tesla_coil_demonstrated", source: "Wikinews" }];
+  const cors = buildCorrelations(dataSheet, related, news);
+  assert.equal(cors.length, 4);
+  const sources = new Set(cors.map((c) => c.source));
+  assert.ok(sources.has("Wikipedia") && sources.has("Wikipedia (related)") && sources.has("Wikinews"));
+  const newsCor = cors.find((c) => c.source === "Wikinews");
+  assert.match(newsCor.fact, /news coverage titled/);
+  assert.equal(newsCor.url, "https://en.wikinews.org/wiki/Tesla_coil_demonstrated");
+});
+
+test("buildCorrelations dedupes identical facts", () => {
+  const dup = [{ title: "Thomas Edison", summary: "", url: "u", source: "Wikipedia (related)" }];
+  // A related item titled the same as an association produces a different
+  // sentence ("linked to" vs "documented in connection with"), so both stay;
+  // but a true duplicate fact (same related item twice) collapses to one.
+  const cors = buildCorrelations(dataSheet, [...dup, ...dup], []);
+  const linked = cors.filter((c) => c.fact.includes("encyclopedically linked to Thomas Edison"));
+  assert.equal(linked.length, 1);
+});
+
 test("buildWorkFile assembles from a fetched data sheet", async () => {
   const fakeFetch = async () => ({
     ok: true,
@@ -95,19 +117,36 @@ test("generateNarrative normalizes and keeps only well-formed claims", async () 
       body: "long body",
       claims: [{ text: "claim a", basedOn: "F1" }, { text: "missing basedOn" }, "garbage"],
     });
-  const n = await generateNarrative(provider, workFile, CATEGORIES[0], fake);
+  const n = await generateNarrative(provider, workFile, CATEGORIES[0], "English", fake);
   assert.equal(n.headline, "The Pattern");
   assert.deepEqual(n.claims, [{ text: "claim a", basedOn: "F1" }]);
 });
 
 test("generateNarrative throws when no usable body comes back", async () => {
   const fake = async () => "no json at all";
-  await assert.rejects(() => generateNarrative(provider, workFile, CATEGORIES[0], fake), /usable article/);
+  await assert.rejects(() => generateNarrative(provider, workFile, CATEGORIES[0], "English", fake), /usable article/);
+});
+
+test("narrative prompt instructs the chosen language", () => {
+  const { system } = buildNarrativePrompt(workFile, CATEGORIES[0], "Dutch (Nederlands)");
+  assert.match(system, /Dutch \(Nederlands\)/);
+});
+
+test("generateNarrative passes the language into the prompt", async () => {
+  let captured;
+  const fake = async (_p, system) => { captured = system; return '{"body":"x"}'; };
+  await generateNarrative(provider, workFile, CATEGORIES[0], "Spanish (Español)", fake);
+  assert.match(captured, /Spanish \(Español\)/);
 });
 
 test("deconstruct normalizes a valid deconstruction", async () => {
   const fake = async () => '{"summary":"s","moves":[{"move":"m1","fallacy":"post hoc"},{"bad":true}]}';
-  const d = await deconstruct(provider, { headline: "H", subhead: "S", body: "B", claims: [] }, workFile, fake);
+  const d = await deconstruct(provider, { headline: "H", subhead: "S", body: "B", claims: [] }, workFile, "English", fake);
   assert.equal(d.summary, "s");
   assert.deepEqual(d.moves, [{ move: "m1", fallacy: "post hoc" }]);
+});
+
+test("deconstruction prompt instructs the chosen language", () => {
+  const { system } = buildDeconstructionPrompt({ headline: "H", subhead: "S", body: "B", claims: [] }, workFile, "French (Français)");
+  assert.match(system, /French \(Français\)/);
 });
