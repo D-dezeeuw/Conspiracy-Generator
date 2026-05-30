@@ -130,9 +130,26 @@
         <h2 class="headline">{{articleHeadline}}</h2>
         <p class="subhead" data-if="articleSubhead">{{articleSubhead}}</p>
         <div class="body">
-          <template data-each="bodyParas" data-as="para">
-            <p>{{para}}</p>
-          </template>
+          <!-- Manufactured authority quotes: real words, ominous framing.
+               Floated so they sit throughout the running text. Wrapped in
+               their own layer because sibling data-each templates can't share
+               a parent (the first marks it; the second is skipped). The layer
+               is display:contents so the floats still reference the body. -->
+          <div class="quotes-layer">
+            <template data-each="pullQuotes" data-as="q">
+              <blockquote class="pull">
+                “{{q.quote}}”
+                <cite data-if="q.attributedTo">— {{q.attributedTo}}</cite>
+                <span class="spin">{{q.spin}}</span>
+              </blockquote>
+            </template>
+          </div>
+          <div class="paras-layer">
+            <template data-each="bodyParas" data-as="para">
+              <p>{{para}}</p>
+            </template>
+          </div>
+          <p class="closer" data-if="closer">{{closer}}</p>
         </div>
         <p class="match-note">
           Source of every underlying fact:

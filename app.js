@@ -61,6 +61,8 @@ setValue("hasArticle", false);
 setValue("articleHeadline", "");
 setValue("articleSubhead", "");
 setValue("bodyParas", []);
+setValue("pullQuotes", []);
+setValue("closer", "");
 setValue("claims", []);
 setValue("hasReveal", false);
 setValue("revealSummary", "");
@@ -110,6 +112,8 @@ function providerFrom(state) {
 function clearGenerated() {
   setValue("hasArticle", false);
   setValue("bodyParas", []);
+  setValue("pullQuotes", []);
+  setValue("closer", "");
   setValue("claims", []);
   setValue("hasReveal", false);
   setValue("moves", []);
@@ -193,6 +197,8 @@ defineFn(
       setValue("articleHeadline", narrative.headline);
       setValue("articleSubhead", narrative.subhead);
       setValue("bodyParas", toParagraphs(narrative.body));
+      setValue("pullQuotes", narrative.pullQuotes);
+      setValue("closer", narrative.closer);
       setValue("claims", narrative.claims);
       setValue("hasArticle", true);
 

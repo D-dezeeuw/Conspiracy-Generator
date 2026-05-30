@@ -36,9 +36,14 @@ bundler.
    pauses so you can confirm or change the pattern **and choose the report language**.
 5. The LLM writes a **sensationalized article** that amplifies the *interpretation* of those facts
    without inventing any new ones, **in your chosen language**. Every claim is tagged with the real
-   fact it rests on.
+   fact it rests on. Woven through it are **manufactured authority quotes** — real phrases pulled
+   *verbatim* from the source and reframed with an ominous gloss (the words are never altered or
+   invented; a post-generation guard drops any quote that isn't a literal substring of the source).
+   The article ends on an **"it never ended" closer** that insinuates the pattern persists to this
+   day without asserting any new fact.
 6. A **deconstruction panel** (also in your chosen language) names each persuasive move and the
-   fallacy it illustrates.
+   fallacy it illustrates — explicitly including the quote-out-of-context and unfalsifiable-
+   continuation techniques, so every device the article used is exposed.
 
 > **On the source pool:** the engine only ingests *real, independently published* facts that carry a
 > verifiable URL — it deliberately does **not** scrape conspiracy sites, because injecting fabricated
